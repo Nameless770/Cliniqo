@@ -1,0 +1,32 @@
+# Local development database only.
+#
+# NOT a production topology. Production Postgres must be a managed, encrypted-at-rest
+# instance from a vendor with a signed Business Associate Agreement — see CLAUDE.md.
+#
+# No PHI belongs in this container. Development and test data must be synthetic
+# (§164.514); a copy of production is not a test fixture.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cliniqo-postgres
+    restart: unless-stopped
+    environment:
+      # Local-only credentials. The owner role runs migrations; the application connects
+      # as cliniqo_app, which migration 0001 creates with reduced privileges.
+      POSTGRES_USER: cliniqo_owner
+      POSTGRES_PASSWORD: cliniqo_local_dev
+      POSTGRES_DB: cliniqo
+    ports:
+      # Bound to loopback so the database is not reachable from the local network.
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - cliniqo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cliniqo_owner -d cliniqo']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  cliniqo_pgdata:

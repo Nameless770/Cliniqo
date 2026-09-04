@@ -1,0 +1,62 @@
+/*
+ * Global baseline only.
+ *
+ * Cliniqo has no CSS framework installed yet — that is a deliberate open decision, not
+ * an oversight. CLAUDE.md requires asking before adding a dependency, and a styling
+ * system is a large, hard-to-reverse one. Tailwind is the obvious candidate when UI work
+ * starts in a later phase.
+ *
+ * Component styles live in CSS Modules next to their component until then.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Placeholder tokens. Replaced when the brand identity is designed. */
+  --color-bg: #ffffff;
+  --color-fg: #16181d;
+  --color-muted: #5b6472;
+  --color-border: #e2e5ea;
+  --color-accent: #1f6f6b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #101317;
+    --color-fg: #e8eaed;
+    --color-muted: #99a1ad;
+    --color-border: #262b33;
+    --color-accent: #4bb3ac;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+/* Never remove focus indicators. Staff work these screens at speed, often by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

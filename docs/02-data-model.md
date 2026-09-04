@@ -11,14 +11,14 @@ The six decisions left open by [01-requirements-analysis.md](01-requirements-ana
 are resolved here as follows. Each is reversible before implementation; some get expensive
 after.
 
-| # | Decision | Adopted | Cost to reverse later |
-| - | -------- | ------- | --------------------- |
-| 1 | Doctor scope | Doctors see **all patients at their clinic**. Detection (audit + flagging) replaces prevention. | Low — add a care-relationship table and tighten the access layer. |
-| 2 | Billing | **Out of the MVP.** Removed from the role matrix. | Low. |
-| 3 | Prescriptions | **Record-and-print only.** Controlled substances blocked at the model level. | High — e-prescribing reshapes the prescription tables. |
-| 4 | Multi-tenancy | `clinic_id` carried on every tenant-scoped table. No tenant-switching UI. | Very high — this is the one that must be right now. |
-| 5 | Note lifecycle | **draft → signed → addendum.** | Medium. |
-| 6 | Multiple roles | Yes, via a `user_role` join table. | Medium. |
+| #   | Decision       | Adopted                                                                                         | Cost to reverse later                                             |
+| --- | -------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1   | Doctor scope   | Doctors see **all patients at their clinic**. Detection (audit + flagging) replaces prevention. | Low — add a care-relationship table and tighten the access layer. |
+| 2   | Billing        | **Out of the MVP.** Removed from the role matrix.                                               | Low.                                                              |
+| 3   | Prescriptions  | **Record-and-print only.** Controlled substances blocked at the model level.                    | High — e-prescribing reshapes the prescription tables.            |
+| 4   | Multi-tenancy  | `clinic_id` carried on every tenant-scoped table. No tenant-switching UI.                       | Very high — this is the one that must be right now.               |
+| 5   | Note lifecycle | **draft → signed → addendum.**                                                                  | Medium.                                                           |
+| 6   | Multiple roles | Yes, via a `user_role` join table.                                                              | Medium.                                                           |
 
 Also adopted from the analysis: clinic-issued MRN, coded appointment types (no free-text
 reason at the front desk), no self-service password reset, structured allergies with no
@@ -28,7 +28,7 @@ identity as separate fields.
 **On decision 1.** Letting every doctor see every chart is normal for a single small
 clinic and matches the stated requirement. It has a direct consequence worth stating: once
 permission checks can no longer distinguish legitimate from illegitimate access, the audit
-log stops being a compliance formality and becomes the *only* control that catches a
+log stops being a compliance formality and becomes the _only_ control that catches a
 clinician reading their neighbour's chart. That is why §6 carries flagging, and why the
 log is treated as a first-class part of the model rather than a side table.
 
@@ -51,18 +51,18 @@ log is treated as a first-class part of the model rather than a side table.
 
 ### Sensitivity legend
 
-| Mark | Meaning |
-| ---- | ------- |
-| **C** | Clinical PHI — diagnoses, notes, medications, allergies. Highest restriction. |
+| Mark  | Meaning                                                                                                           |
+| ----- | ----------------------------------------------------------------------------------------------------------------- |
+| **C** | Clinical PHI — diagnoses, notes, medications, allergies. Highest restriction.                                     |
 | **I** | Identifying PHI — name, DOB, contact, MRN. Still PHI: the mere fact that a person is a patient here is protected. |
-| **S** | Secret — credentials and tokens. Not PHI, but must never leave the server or appear in logs. |
-| **·** | Operational, non-sensitive. |
+| **S** | Secret — credentials and tokens. Not PHI, but must never leave the server or appear in logs.                      |
+| **·** | Operational, non-sensitive.                                                                                       |
 
 A note on **I**: it is a common and expensive mistake to treat only clinical columns as
 protected. Under HIPAA, every column on `patient` is PHI, because the row's existence
 links an identifiable person to a healthcare provider. Front-desk staff see **I** but not
-**C** — that is the minimum-necessary boundary, and it is a *different projection of the
-row*, not the same query with fields hidden in the UI.
+**C** — that is the minimum-necessary boundary, and it is a _different projection of the
+row_, not the same query with fields hidden in the UI.
 
 ---
 
@@ -72,23 +72,23 @@ row*, not the same query with fields hidden in the UI.
 
 One row per human. No shared accounts (§164.312(a)(2)(i)).
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | |
-| `clinic_id` | uuid FK → clinic | · | |
-| `email` | citext | · | Login identifier |
-| `password_hash` | text | **S** | Argon2id; parameters embedded in the encoded hash |
-| `password_changed_at` | timestamptz | · | |
-| `must_change_password` | boolean | · | Set by admin-issued reset |
-| `full_name` | text | · | |
-| `status` | enum | · | `active` \| `suspended` \| `deactivated` |
-| `failed_login_count` | integer | · | |
-| `locked_until` | timestamptz | · | Per-account lockout |
-| `last_login_at` | timestamptz | · | |
-| `created_at` / `updated_at` | timestamptz | · | |
-| `created_by` | uuid FK → user_account | · | Nullable for the seed admin |
-| `version` | integer | · | Optimistic concurrency |
-| `archived_at` / `archived_by` / `archive_reason` | — | · | Soft delete |
+| Field                                            | Type                   | Sens. | Notes                                             |
+| ------------------------------------------------ | ---------------------- | :---: | ------------------------------------------------- |
+| `id`                                             | uuid PK                |   ·   |                                                   |
+| `clinic_id`                                      | uuid FK → clinic       |   ·   |                                                   |
+| `email`                                          | citext                 |   ·   | Login identifier                                  |
+| `password_hash`                                  | text                   | **S** | Argon2id; parameters embedded in the encoded hash |
+| `password_changed_at`                            | timestamptz            |   ·   |                                                   |
+| `must_change_password`                           | boolean                |   ·   | Set by admin-issued reset                         |
+| `full_name`                                      | text                   |   ·   |                                                   |
+| `status`                                         | enum                   |   ·   | `active` \| `suspended` \| `deactivated`          |
+| `failed_login_count`                             | integer                |   ·   |                                                   |
+| `locked_until`                                   | timestamptz            |   ·   | Per-account lockout                               |
+| `last_login_at`                                  | timestamptz            |   ·   |                                                   |
+| `created_at` / `updated_at`                      | timestamptz            |   ·   |                                                   |
+| `created_by`                                     | uuid FK → user_account |   ·   | Nullable for the seed admin                       |
+| `version`                                        | integer                |   ·   | Optimistic concurrency                            |
+| `archived_at` / `archived_by` / `archive_reason` | —                      |   ·   | Soft delete                                       |
 
 **Relationships:** `clinic` 1—N `user_account`. `user_account` 1—N `session`,
 1—N `user_role`, 1—0..1 `provider_profile`.
@@ -107,20 +107,20 @@ Global reference tables, seeded, not clinic-scoped.
   `note.sign`, `prescription.create`, `audit.read`), `description`. All `·`.
 - `role_permission` — `role_id` FK, `permission_id` FK. Composite PK.
 
-**Why the extra indirection for three roles.** The access layer checks *permissions*, never
+**Why the extra indirection for three roles.** The access layer checks _permissions_, never
 role names. Adding a nurse role later becomes a seed-data change plus one row of grants,
 rather than a grep for `=== 'doctor'` across every server action and a re-audit of each
 hit. Two small reference tables buy that.
 
 ### `user_role`
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | |
-| `user_id` | uuid FK → user_account | · | |
-| `role_id` | uuid FK → role | · | |
-| `granted_at` / `granted_by` | — | · | |
-| `revoked_at` / `revoked_by` | — | · | Revocations are retained, never deleted |
+| Field                       | Type                   | Sens. | Notes                                   |
+| --------------------------- | ---------------------- | :---: | --------------------------------------- |
+| `id`                        | uuid PK                |   ·   |                                         |
+| `user_id`                   | uuid FK → user_account |   ·   |                                         |
+| `role_id`                   | uuid FK → role         |   ·   |                                         |
+| `granted_at` / `granted_by` | —                      |   ·   |                                         |
+| `revoked_at` / `revoked_by` | —                      |   ·   | Revocations are retained, never deleted |
 
 **Relationship:** M—N between `user_account` and `role`, resolved through this table, so
 the owner-physician holds `admin` and `doctor` on one account.
@@ -142,18 +142,18 @@ for a capability the system does not offer is a liability with no benefit.
 
 ### `session`
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | |
-| `user_id` | uuid FK | · | |
-| `token_hash` | text | **S** | SHA-256 of the token. **The raw token is never stored** — a database read must not yield a usable session. |
-| `created_at` / `last_seen_at` | timestamptz | · | |
-| `idle_expires_at` | timestamptz | · | Automatic logoff, §164.312(a)(2)(iii) |
-| `absolute_expires_at` | timestamptz | · | Independent ceiling |
-| `ip_address` | inet | · | |
-| `user_agent` | text | · | |
-| `revoked_at` | timestamptz | · | |
-| `revoked_reason` | enum | · | `logout` \| `idle_timeout` \| `absolute_timeout` \| `role_change` \| `deactivated` \| `admin_revoke` |
+| Field                         | Type        | Sens. | Notes                                                                                                      |
+| ----------------------------- | ----------- | :---: | ---------------------------------------------------------------------------------------------------------- |
+| `id`                          | uuid PK     |   ·   |                                                                                                            |
+| `user_id`                     | uuid FK     |   ·   |                                                                                                            |
+| `token_hash`                  | text        | **S** | SHA-256 of the token. **The raw token is never stored** — a database read must not yield a usable session. |
+| `created_at` / `last_seen_at` | timestamptz |   ·   |                                                                                                            |
+| `idle_expires_at`             | timestamptz |   ·   | Automatic logoff, §164.312(a)(2)(iii)                                                                      |
+| `absolute_expires_at`         | timestamptz |   ·   | Independent ceiling                                                                                        |
+| `ip_address`                  | inet        |   ·   |                                                                                                            |
+| `user_agent`                  | text        |   ·   |                                                                                                            |
+| `revoked_at`                  | timestamptz |   ·   |                                                                                                            |
+| `revoked_reason`              | enum        |   ·   | `logout` \| `idle_timeout` \| `absolute_timeout` \| `role_change` \| `deactivated` \| `admin_revoke`       |
 
 **Indexes:** unique on `token_hash`; `(user_id)` partial where `revoked_at IS NULL` — this
 is the index that makes "deactivate a user and kill their live sessions now" a single
@@ -169,7 +169,7 @@ so a role change or deactivation takes effect immediately rather than at token e
 
 **Indexes:** `(lower(email_attempted), attempted_at DESC)` and
 `(ip_address, attempted_at DESC)` — two indexes because rate limiting must be per-account
-*and* per-IP simultaneously. Retained 90 days; this is operational security telemetry, not
+_and_ per-IP simultaneously. Retained 90 days; this is operational security telemetry, not
 an audit record, and it lives on a different clock from `audit_event`.
 
 ---
@@ -180,32 +180,32 @@ an audit record, and it lives on a different clock from `audit_event`.
 
 Every column here is PHI.
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | |
-| `clinic_id` | uuid FK | · | |
-| `mrn` | text | **I** | Clinic-issued, from `clinic.mrn_prefix` + sequence |
-| `legal_first_name` | text | **I** | |
-| `legal_middle_name` | text | **I** | |
-| `legal_last_name` | text | **I** | |
-| `preferred_name` | text | **I** | What staff actually call the patient |
-| `pronouns` | text | **I** | |
-| `date_of_birth` | date | **I** | |
-| `sex_assigned_at_birth` | enum | **C** | Clinically relevant — reference ranges, screening |
-| `gender_identity` | text | **I** | Distinct from the above; both are needed |
-| `phone_primary` / `phone_secondary` | text | **I** | |
-| `email` | citext | **I** | |
-| `address_line1` / `line2` / `city` / `state` / `postal_code` | text | **I** | |
-| `preferred_language` | text | **I** | Interpreter needs |
-| `emergency_contact_name` / `_phone` / `_relationship` | text | **I** | |
-| `deceased_date` | date | **C** | Nullable |
-| `npp_acknowledged_at` | timestamptz | · | Notice of Privacy Practices |
-| `npp_document_version` | text | · | Which version they acknowledged |
-| `merged_into_patient_id` | uuid FK → patient | · | Self-reference, for duplicate resolution |
-| `search_vector` | tsvector | **I** | Generated; see §8 |
-| `registered_by` / `registered_at` | — | · | |
-| `created_at` / `updated_at` / `version` | — | · | |
-| `archived_at` / `archived_by` / `archive_reason` | — | · | |
+| Field                                                        | Type              | Sens. | Notes                                              |
+| ------------------------------------------------------------ | ----------------- | :---: | -------------------------------------------------- |
+| `id`                                                         | uuid PK           |   ·   |                                                    |
+| `clinic_id`                                                  | uuid FK           |   ·   |                                                    |
+| `mrn`                                                        | text              | **I** | Clinic-issued, from `clinic.mrn_prefix` + sequence |
+| `legal_first_name`                                           | text              | **I** |                                                    |
+| `legal_middle_name`                                          | text              | **I** |                                                    |
+| `legal_last_name`                                            | text              | **I** |                                                    |
+| `preferred_name`                                             | text              | **I** | What staff actually call the patient               |
+| `pronouns`                                                   | text              | **I** |                                                    |
+| `date_of_birth`                                              | date              | **I** |                                                    |
+| `sex_assigned_at_birth`                                      | enum              | **C** | Clinically relevant — reference ranges, screening  |
+| `gender_identity`                                            | text              | **I** | Distinct from the above; both are needed           |
+| `phone_primary` / `phone_secondary`                          | text              | **I** |                                                    |
+| `email`                                                      | citext            | **I** |                                                    |
+| `address_line1` / `line2` / `city` / `state` / `postal_code` | text              | **I** |                                                    |
+| `preferred_language`                                         | text              | **I** | Interpreter needs                                  |
+| `emergency_contact_name` / `_phone` / `_relationship`        | text              | **I** |                                                    |
+| `deceased_date`                                              | date              | **C** | Nullable                                           |
+| `npp_acknowledged_at`                                        | timestamptz       |   ·   | Notice of Privacy Practices                        |
+| `npp_document_version`                                       | text              |   ·   | Which version they acknowledged                    |
+| `merged_into_patient_id`                                     | uuid FK → patient |   ·   | Self-reference, for duplicate resolution           |
+| `search_vector`                                              | tsvector          | **I** | Generated; see §8                                  |
+| `registered_by` / `registered_at`                            | —                 |   ·   |                                                    |
+| `created_at` / `updated_at` / `version`                      | —                 |   ·   |                                                    |
+| `archived_at` / `archived_by` / `archive_reason`             | —                 |   ·   |                                                    |
 
 **Relationships:** `clinic` 1—N `patient`. `patient` 1—N `patient_allergy`, `patient_flag`,
 `appointment`, `visit_note`, `prescription`, `audit_event`.
@@ -292,23 +292,23 @@ than typing a reason. **Index:** unique `(clinic_id, code)`.
 
 ### `appointment`
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | |
-| `clinic_id` | uuid FK | · | |
-| `patient_id` | uuid FK | **I** | The association itself is PHI |
-| `provider_user_id` | uuid FK | · | |
-| `appointment_type_id` | uuid FK | **C** | A coded type still implies clinical content |
-| `during` | tstzrange | **I** | Authoritative time; enables the exclusion constraint |
-| `starts_at` / `ends_at` | timestamptz | **I** | Generated from `during`; see §8 |
-| `status` | enum | · | `booked`\|`checked_in`\|`in_progress`\|`completed`\|`cancelled`\|`no_show` |
-| `booking_note` | text | **I** | Front-desk visible. Logistics only — see caveat below |
-| `clinical_note_for_provider` | text | **C** | Clinician-only projection |
-| `checked_in_at` / `checked_in_by` | — | · | |
-| `cancelled_at` / `cancelled_by` / `cancellation_reason` | — | · | |
-| `rescheduled_from_appointment_id` | uuid FK → appointment | · | Self-reference; preserves the reschedule chain |
-| `created_by` / `created_at` / `updated_at` / `version` | — | · | |
-| `archived_*` | — | · | |
+| Field                                                   | Type                  | Sens. | Notes                                                                      |
+| ------------------------------------------------------- | --------------------- | :---: | -------------------------------------------------------------------------- |
+| `id`                                                    | uuid PK               |   ·   |                                                                            |
+| `clinic_id`                                             | uuid FK               |   ·   |                                                                            |
+| `patient_id`                                            | uuid FK               | **I** | The association itself is PHI                                              |
+| `provider_user_id`                                      | uuid FK               |   ·   |                                                                            |
+| `appointment_type_id`                                   | uuid FK               | **C** | A coded type still implies clinical content                                |
+| `during`                                                | tstzrange             | **I** | Authoritative time; enables the exclusion constraint                       |
+| `starts_at` / `ends_at`                                 | timestamptz           | **I** | Generated from `during`; see §8                                            |
+| `status`                                                | enum                  |   ·   | `booked`\|`checked_in`\|`in_progress`\|`completed`\|`cancelled`\|`no_show` |
+| `booking_note`                                          | text                  | **I** | Front-desk visible. Logistics only — see caveat below                      |
+| `clinical_note_for_provider`                            | text                  | **C** | Clinician-only projection                                                  |
+| `checked_in_at` / `checked_in_by`                       | —                     |   ·   |                                                                            |
+| `cancelled_at` / `cancelled_by` / `cancellation_reason` | —                     |   ·   |                                                                            |
+| `rescheduled_from_appointment_id`                       | uuid FK → appointment |   ·   | Self-reference; preserves the reschedule chain                             |
+| `created_by` / `created_at` / `updated_at` / `version`  | —                     |   ·   |                                                                            |
+| `archived_*`                                            | —                     |   ·   |                                                                            |
 
 **Constraints:**
 
@@ -325,7 +325,7 @@ GiST `(clinic_id, during)` for the clinic day view; `(patient_id, starts_at DESC
 patient history; `(clinic_id, starts_at)` partial where `status IN ('booked','checked_in')`
 for today's arrivals board.
 
-**Caveat on `booking_note`.** Coded types remove the *need* for free text, but staff will
+**Caveat on `booking_note`.** Coded types remove the _need_ for free text, but staff will
 still occasionally type clinical detail into a logistics field. The model cannot prevent
 this. Mitigation is operational: label the field explicitly as logistics-only, and include
 it in the periodic audit review sample.
@@ -338,19 +338,19 @@ Split into a stable container and immutable content versions.
 
 ### `visit_note`
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | Stable identity of "the note for this visit" |
-| `clinic_id` | uuid FK | · | |
-| `patient_id` | uuid FK | **I** | |
-| `appointment_id` | uuid FK **nullable** | · | Null for walk-ins with no booking |
-| `author_user_id` | uuid FK | · | Original author |
-| `status` | enum | · | `draft` \| `signed` \| `amended` |
-| `current_version_id` | uuid FK → visit_note_version | · | Denormalized pointer; see §8 |
-| `signed_at` / `signed_by` | — | · | |
-| `created_at` / `updated_at` | — | · | |
-| `version` | integer | · | Optimistic concurrency between concurrent editors |
-| `archived_at` / `archived_by` / `archive_reason` | — | · | |
+| Field                                            | Type                         | Sens. | Notes                                             |
+| ------------------------------------------------ | ---------------------------- | :---: | ------------------------------------------------- |
+| `id`                                             | uuid PK                      |   ·   | Stable identity of "the note for this visit"      |
+| `clinic_id`                                      | uuid FK                      |   ·   |                                                   |
+| `patient_id`                                     | uuid FK                      | **I** |                                                   |
+| `appointment_id`                                 | uuid FK **nullable**         |   ·   | Null for walk-ins with no booking                 |
+| `author_user_id`                                 | uuid FK                      |   ·   | Original author                                   |
+| `status`                                         | enum                         |   ·   | `draft` \| `signed` \| `amended`                  |
+| `current_version_id`                             | uuid FK → visit_note_version |   ·   | Denormalized pointer; see §8                      |
+| `signed_at` / `signed_by`                        | —                            |   ·   |                                                   |
+| `created_at` / `updated_at`                      | —                            |   ·   |                                                   |
+| `version`                                        | integer                      |   ·   | Optimistic concurrency between concurrent editors |
+| `archived_at` / `archived_by` / `archive_reason` | —                            |   ·   |                                                   |
 
 **Indexes:** `(patient_id, created_at DESC)` — the chart timeline;
 `(appointment_id)` unique partial where `archived_at IS NULL`; `(author_user_id, status)`
@@ -362,22 +362,22 @@ that stops notes being forgotten.
 Append-only. No `archived_at` — versions are never deleted or archived, because that is
 the entire point of them.
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | |
-| `visit_note_id` | uuid FK | · | |
-| `version_number` | integer | · | 1-based, monotonic within the note |
-| `kind` | enum | · | `draft` \| `signed` \| `addendum` |
-| `chief_complaint` | text | **C** | |
-| `subjective` | text | **C** | |
-| `objective` | text | **C** | |
-| `assessment` | text | **C** | |
-| `plan` | text | **C** | |
-| `authored_by_user_id` | uuid FK | · | May differ from the note's original author |
-| `authored_at` | timestamptz | · | |
-| `frozen_at` | timestamptz | · | Null while the draft is still mutable |
-| `supersedes_version_id` | uuid FK → visit_note_version | · | |
-| `content_hash` | text | · | Tamper evidence; chains to the prior version's hash |
+| Field                   | Type                         | Sens. | Notes                                               |
+| ----------------------- | ---------------------------- | :---: | --------------------------------------------------- |
+| `id`                    | uuid PK                      |   ·   |                                                     |
+| `visit_note_id`         | uuid FK                      |   ·   |                                                     |
+| `version_number`        | integer                      |   ·   | 1-based, monotonic within the note                  |
+| `kind`                  | enum                         |   ·   | `draft` \| `signed` \| `addendum`                   |
+| `chief_complaint`       | text                         | **C** |                                                     |
+| `subjective`            | text                         | **C** |                                                     |
+| `objective`             | text                         | **C** |                                                     |
+| `assessment`            | text                         | **C** |                                                     |
+| `plan`                  | text                         | **C** |                                                     |
+| `authored_by_user_id`   | uuid FK                      |   ·   | May differ from the note's original author          |
+| `authored_at`           | timestamptz                  |   ·   |                                                     |
+| `frozen_at`             | timestamptz                  |   ·   | Null while the draft is still mutable               |
+| `supersedes_version_id` | uuid FK → visit_note_version |   ·   |                                                     |
+| `content_hash`          | text                         |   ·   | Tamper evidence; chains to the prior version's hash |
 
 **Indexes:** unique `(visit_note_id, version_number)`; `(visit_note_id, version_number DESC)`
 for history retrieval.
@@ -434,25 +434,25 @@ paper prescriptions work and what the legal record expects.
 
 Append-only, range-partitioned monthly on `occurred_at`.
 
-| Field | Type | Sens. | Notes |
-| ----- | ---- | :---: | ----- |
-| `id` | uuid PK | · | UUIDv7 — time-ordered, keeps insert locality on a huge table |
-| `occurred_at` | timestamptz | · | Partition key |
-| `clinic_id` | uuid | · | Denormalized |
-| `actor_user_id` | uuid FK → user_account | · | |
-| `actor_role_codes` | text[] | · | **Snapshot** of roles at the moment of action |
-| `actor_ip` | inet | · | |
-| `actor_user_agent` | text | · | |
-| `session_id` | uuid | · | Correlates a run of actions to one login |
-| `action` | text | · | `patient.search`, `patient.read`, `note.read`, `note.sign`, … |
-| `outcome` | enum | · | `allowed` \| `denied` \| `error` |
-| `subject_patient_id` | uuid FK → patient | **I** | Whose PHI was touched. See §10 |
-| `entity_type` | enum | · | `patient`\|`appointment`\|`visit_note`\|`prescription`\|`user_account`\|… |
-| `entity_id` | uuid | · | Polymorphic — **no FK constraint**. See §10 |
-| `purpose` | text | · | Stated reason; required for break-glass |
-| `break_glass_grant_id` | uuid FK nullable | · | |
-| `request_id` | text | · | Correlates to application logs |
-| `metadata` | jsonb | · | Field *names* accessed, result counts. **Never PHI values** |
+| Field                  | Type                   | Sens. | Notes                                                                     |
+| ---------------------- | ---------------------- | :---: | ------------------------------------------------------------------------- |
+| `id`                   | uuid PK                |   ·   | UUIDv7 — time-ordered, keeps insert locality on a huge table              |
+| `occurred_at`          | timestamptz            |   ·   | Partition key                                                             |
+| `clinic_id`            | uuid                   |   ·   | Denormalized                                                              |
+| `actor_user_id`        | uuid FK → user_account |   ·   |                                                                           |
+| `actor_role_codes`     | text[]                 |   ·   | **Snapshot** of roles at the moment of action                             |
+| `actor_ip`             | inet                   |   ·   |                                                                           |
+| `actor_user_agent`     | text                   |   ·   |                                                                           |
+| `session_id`           | uuid                   |   ·   | Correlates a run of actions to one login                                  |
+| `action`               | text                   |   ·   | `patient.search`, `patient.read`, `note.read`, `note.sign`, …             |
+| `outcome`              | enum                   |   ·   | `allowed` \| `denied` \| `error`                                          |
+| `subject_patient_id`   | uuid FK → patient      | **I** | Whose PHI was touched. See §10                                            |
+| `entity_type`          | enum                   |   ·   | `patient`\|`appointment`\|`visit_note`\|`prescription`\|`user_account`\|… |
+| `entity_id`            | uuid                   |   ·   | Polymorphic — **no FK constraint**. See §10                               |
+| `purpose`              | text                   |   ·   | Stated reason; required for break-glass                                   |
+| `break_glass_grant_id` | uuid FK nullable       |   ·   |                                                                           |
+| `request_id`           | text                   |   ·   | Correlates to application logs                                            |
+| `metadata`             | jsonb                  |   ·   | Field _names_ accessed, result counts. **Never PHI values**               |
 
 No `updated_at`, no `archived_at`, no `version`. The application database role holds
 `INSERT` and `SELECT` on this table and nothing else — immutability is enforced by
@@ -554,25 +554,25 @@ account does not let anyone rewrite the log.
 
 **Cardinality summary**
 
-| From | To | Card. |
-| ---- | -- | ----- |
-| clinic | user_account, patient, appointment, appointment_type, clinic_hours, schedule_exception | 1—N |
-| user_account | role | M—N (via `user_role`) |
-| role | permission | M—N (via `role_permission`) |
-| user_account | provider_profile | 1—0..1 |
-| user_account | session, auth_attempt | 1—N |
-| patient | patient_allergy, patient_flag, appointment, visit_note, prescription | 1—N |
-| patient | patient (merge target) | N—0..1 self |
-| provider (user_account) | appointment | 1—N |
-| appointment | appointment (reschedule source) | N—0..1 self |
-| appointment | visit_note | 1—0..1 |
-| visit_note | visit_note_version | 1—N |
-| visit_note_version | visit_note_version (supersedes) | N—0..1 self |
-| visit_note | prescription | 1—N |
-| prescription | prescription_item | 1—N |
-| medication | prescription_item | 1—N |
-| patient | audit_event | 1—N (as `subject_patient_id`) |
-| user_account | audit_event | 1—N (as `actor_user_id`) |
+| From                    | To                                                                                     | Card.                         |
+| ----------------------- | -------------------------------------------------------------------------------------- | ----------------------------- |
+| clinic                  | user_account, patient, appointment, appointment_type, clinic_hours, schedule_exception | 1—N                           |
+| user_account            | role                                                                                   | M—N (via `user_role`)         |
+| role                    | permission                                                                             | M—N (via `role_permission`)   |
+| user_account            | provider_profile                                                                       | 1—0..1                        |
+| user_account            | session, auth_attempt                                                                  | 1—N                           |
+| patient                 | patient_allergy, patient_flag, appointment, visit_note, prescription                   | 1—N                           |
+| patient                 | patient (merge target)                                                                 | N—0..1 self                   |
+| provider (user_account) | appointment                                                                            | 1—N                           |
+| appointment             | appointment (reschedule source)                                                        | N—0..1 self                   |
+| appointment             | visit_note                                                                             | 1—0..1                        |
+| visit_note              | visit_note_version                                                                     | 1—N                           |
+| visit_note_version      | visit_note_version (supersedes)                                                        | N—0..1 self                   |
+| visit_note              | prescription                                                                           | 1—N                           |
+| prescription            | prescription_item                                                                      | 1—N                           |
+| medication              | prescription_item                                                                      | 1—N                           |
+| patient                 | audit_event                                                                            | 1—N (as `subject_patient_id`) |
+| user_account            | audit_event                                                                            | 1—N (as `actor_user_id`)      |
 
 ---
 
@@ -688,7 +688,7 @@ rather than a default.**
 
 ### Tamper evidence
 
-`content_hash` covers the frozen content *and the previous version's hash*, forming a chain
+`content_hash` covers the frozen content _and the previous version's hash_, forming a chain
 per note. A silent post-hoc edit at the database level breaks the chain and becomes
 detectable. This is cheap to compute and turns "the note says it was signed on the 3rd"
 into something verifiable.
@@ -710,14 +710,14 @@ login — which is how you tell one long browsing session from twelve suspicious
 
 `subject_patient_id` is a real foreign key to `patient`, and it is populated on **every**
 event that touches PHI, regardless of which object was actually read. Opening a
-prescription writes the prescription in `entity_id` *and* the patient in
+prescription writes the prescription in `entity_id` _and_ the patient in
 `subject_patient_id`.
 
 This redundancy is the single most important design choice in the table. It makes the two
 questions that carry legal deadlines into single-index lookups:
 
-- *"Who accessed this patient's record, and when?"* — §164.528, six years back.
-- *"This account was compromised. Whose records did it touch?"* — §164.400–414, 60 days.
+- _"Who accessed this patient's record, and when?"_ — §164.528, six years back.
+- _"This account was compromised. Whose records did it touch?"_ — §164.400–414, 60 days.
 
 Without it, answering either question means walking every entity type and resolving each
 back to a patient across a partitioned table under time pressure.
@@ -745,14 +745,14 @@ integrity job can sample for orphans.
 The audit row is written **in the same transaction** as the operation it records. A rolled
 back operation leaves no phantom audit entry, and a committed read cannot be unlogged.
 
-The honest tradeoff: this makes every PHI *read* a write transaction. At clinic scale —
+The honest tradeoff: this makes every PHI _read_ a write transaction. At clinic scale —
 tens of concurrent users, not tens of thousands — this is comfortably affordable, and it is
 the right trade against the alternative of an async logging path that can silently drop
 events. It should be revisited if Cliniqo ever serves a hospital-sized workload.
 
 ### What must never be in the log
 
-`metadata` records *which fields* were accessed and *how many* results a search returned.
+`metadata` records _which fields_ were accessed and _how many_ results a search returned.
 It never records field values, search terms, or note content. An audit log full of PHI is a
 second copy of the database with a six-year retention requirement and weaker access
 controls than the original.

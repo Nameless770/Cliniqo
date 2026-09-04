@@ -2,13 +2,19 @@
  * PostgreSQL client.
  *
  * SERVER ONLY. This module must never be reachable from a Client Component — importing
- * it there would pull connection credentials into the browser bundle.
+ * it there would pull connection credentials into the browser bundle. `server-only` turns
+ * that mistake into a build error.
+ *
+ * Configuration comes from the validated `env` object, never from `process.env` directly,
+ * so a malformed value fails at startup rather than at the first patient lookup.
  */
 
 import 'server-only';
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, types } from 'pg';
+
+import { getEnv, type ServerEnv } from '@/env/server';
 
 import * as schema from './schema';
 
@@ -32,99 +38,91 @@ types.setTypeParser(1700, (value) => value);
 /* Connection                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function connectionString(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    // Fail at startup rather than on the first patient lookup.
-    throw new Error('DATABASE_URL is not set.');
-  }
-  return url;
-}
-
 /**
  * TLS to the database.
  *
- * Encryption in transit is required, and "in transit" includes the application-to-
- * database hop, which is the one people forget. In production we verify the server
- * certificate against a pinned CA; `rejectUnauthorized: false` would accept any
- * certificate and reduce TLS to obfuscation.
- *
- * Local Docker Compose runs without TLS on a private network — set DATABASE_SSL=disable
- * there, and nowhere else.
+ * `rejectUnauthorized: true` is the whole point — accepting any certificate would reduce
+ * TLS to obfuscation. The production guard lives in the env schema, which refuses to
+ * start with DATABASE_SSL=disable when APP_ENV=production.
  */
-function sslConfig() {
-  const mode = process.env.DATABASE_SSL ?? 'verify';
+function sslConfig(env: ServerEnv) {
+  if (env.DATABASE_SSL === 'disable') return false;
 
-  if (mode === 'disable') {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('DATABASE_SSL=disable is not permitted in production.');
-    }
-    return false;
-  }
-
-  const ca = process.env.DATABASE_CA_CERT;
   return {
     rejectUnauthorized: true,
-    ...(ca ? { ca } : {}),
+    ...(env.DATABASE_CA_CERT ? { ca: env.DATABASE_CA_CERT } : {}),
   };
 }
 
-const pool = new Pool({
-  connectionString: connectionString(),
-  ssl: sslConfig(),
+function createPool(env: ServerEnv): Pool {
+  const pool = new Pool({
+    connectionString: env.DATABASE_URL,
+    ssl: sslConfig(env),
 
-  max: Number(process.env.DATABASE_POOL_MAX ?? 10),
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
+    max: env.DATABASE_POOL_MAX,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+
+    /**
+     * Server-side caps. A runaway query holding a connection open is an availability
+     * problem; one holding a transaction open also blocks the audit writes that share it.
+     */
+    statement_timeout: 15_000,
+    idle_in_transaction_session_timeout: 30_000,
+
+    application_name: 'cliniqo',
+  });
 
   /**
-   * Server-side caps. A runaway query holding a connection open is a availability
-   * problem; one holding a transaction open also blocks the audit writes that share it.
+   * Pool errors arrive on idle clients and are otherwise unhandled — an unhandled 'error'
+   * event on a Pool crashes the process.
+   *
+   * Deliberately logs only the message. A pg error can carry parameter values in its
+   * detail fields, and in this application those parameters are patient data.
    */
-  statement_timeout: 15_000,
-  idle_in_transaction_session_timeout: 30_000,
+  pool.on('error', (error) => {
+    console.error('[db] idle client error:', error.message);
+  });
 
-  application_name: 'cliniqo',
-});
-
-/**
- * Pool errors arrive on idle clients and are otherwise unhandled — an unhandled 'error'
- * event on a Pool crashes the process.
- *
- * Deliberately logs only the message. A pg error can carry parameter values in its
- * detail fields, and those parameters are patient data.
- */
-pool.on('error', (err) => {
-  console.error('[db] idle client error:', err.message);
-});
+  return pool;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Drizzle                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Cached across hot reloads. Next.js dev re-evaluates modules on every change; without
- * this, each reload leaks a pool and the database runs out of connections.
- */
-const globalForDb = globalThis as unknown as {
-  cliniqoDb?: ReturnType<typeof createDb>;
-};
-
 function createDb() {
-  return drizzle(pool, {
+  const env = getEnv();
+
+  return drizzle(createPool(env), {
     schema,
-    // Query text is safe to log; bound parameters are not — they are patient data.
-    // Leave this off. Diagnose slow queries with pg_stat_statements, which normalises
-    // parameters out, rather than by logging them here.
+    // Query text would be safe to log; bound parameters are not — they are patient data,
+    // and Drizzle's logger prints both. Diagnose slow queries with pg_stat_statements,
+    // which normalises parameters out.
     logger: false,
   });
 }
 
-export const db = globalForDb.cliniqoDb ?? createDb();
+export type Db = ReturnType<typeof createDb>;
 
-if (process.env.NODE_ENV !== 'production') {
-  globalForDb.cliniqoDb = db;
+/**
+ * Cached on globalThis across hot reloads. Next.js dev re-evaluates modules on every
+ * change; without this, each reload leaks a pool until the database refuses connections.
+ */
+const globalForDb = globalThis as unknown as { cliniqoDb?: Db };
+
+/**
+ * The database handle.
+ *
+ * A function rather than a module-scope constant, so that importing this module does not
+ * open a connection or read configuration. `next build` imports route modules to collect
+ * page data, and a build must not need a reachable database or a production secret.
+ *
+ * The connection is established on first real use, and reused thereafter.
+ */
+export function getDb(): Db {
+  globalForDb.cliniqoDb ??= createDb();
+  return globalForDb.cliniqoDb;
 }
 
-export type Db = typeof db;
 export { schema };

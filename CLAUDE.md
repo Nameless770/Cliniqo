@@ -10,10 +10,10 @@ will be audited.
 
 ## Stack — do not substitute without asking
 
-| Layer     | Choice                                  |
-| --------- | --------------------------------------- |
-| Framework | Next.js (App Router) + TypeScript        |
-| Database  | PostgreSQL                               |
+| Layer     | Choice                                    |
+| --------- | ----------------------------------------- |
+| Framework | Next.js (App Router) + TypeScript         |
+| Database  | PostgreSQL                                |
 | ORM       | Drizzle ORM, with explicit SQL migrations |
 
 If a task seems to need another library, ask before adding it. Any dependency that can
@@ -31,7 +31,7 @@ Associate Agreement with the vendor — flag it instead of installing it.
    `doctor`, `receptionist`. Hiding a button is not access control. Every server action
    re-checks authorization itself; it never trusts that the caller already checked.
 3. **Audit-log every read and write of a patient record.** Reads too, not just writes —
-   HIPAA §164.312(b) requires recording who *looked*.
+   HIPAA §164.312(b) requires recording who _looked_.
 4. **No hard deletes of clinical data.** Soft-delete / archive. Same for edits: patients
    have a right to amend records (§164.526), so amendments preserve prior versions rather
    than overwriting them.
@@ -39,7 +39,7 @@ Associate Agreement with the vendor — flag it instead of installing it.
    checked in, never auto-pushed.
 6. **Prefer server actions over API routes** unless there's a clear reason (webhooks,
    third-party callbacks, streaming, non-browser clients).
-7. **Explain any security-relevant decision you make.** A sentence on *why*, in the
+7. **Explain any security-relevant decision you make.** A sentence on _why_, in the
    response — not just in a comment.
 
 ---
@@ -55,7 +55,7 @@ Associate Agreement with the vendor — flag it instead of installing it.
   never soft-deleted, purged, or edited — not even by `admin`.
 - **Encryption in transit and at rest.** Treated as required, not optional.
 - **No PHI in exhaust.** Not in application logs, stack traces, error messages shown to
-  users, URLs, analytics events, or third-party telemetry. Log record *IDs*, never names,
+  users, URLs, analytics events, or third-party telemetry. Log record _IDs_, never names,
   diagnoses, or note bodies.
 - **Breach notification is 60 days.** Which is why the audit log has to be good enough to
   answer "whose data was accessed, by whom, when" without guesswork.
@@ -64,8 +64,8 @@ Associate Agreement with the vendor — flag it instead of installing it.
 
 ## Roles
 
-| Capability                        | admin | doctor | receptionist |
-| --------------------------------- | :---: | :----: | :----------: |
+| Capability                         | admin | doctor | receptionist |
+| ---------------------------------- | :---: | :----: | :----------: |
 | Patient demographics / contact     |  ✅   |   ✅   |      ✅      |
 | Scheduling & appointments          |  ✅   |   ✅   |      ✅      |
 | Clinical notes, diagnoses, results |  ✅*  |   ✅   |      ❌      |

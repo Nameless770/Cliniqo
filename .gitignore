@@ -1,0 +1,23 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Secrets. .env.example is committed; .env is never.
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Local database volume, if bind-mounted
+pgdata/
+
+npm-debug.log*
+.DS_Store
+Thumbs.db
+next-env.d.ts
+.vscode/
+.idea/
+*.tsbuildinfo

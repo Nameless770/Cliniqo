@@ -32,7 +32,14 @@ import {
   sexAssignedAtBirth,
 } from './enums';
 import { userAccount } from './identity';
-import { citext, primaryId, rowVersion, softDelete, timestamps, tsvector } from './shared';
+import {
+  citext,
+  primaryId,
+  rowVersion,
+  softDelete,
+  timestamps,
+  tsvector,
+} from './shared';
 
 /* -------------------------------------------------------------------------- */
 
@@ -114,7 +121,9 @@ export const patient = pgTable(
     ),
 
     registeredBy: uuid('registered_by').references(() => userAccount.id),
-    registeredAt: timestamp('registered_at', { withTimezone: true }).notNull().defaultNow(),
+    registeredAt: timestamp('registered_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
 
     ...timestamps(),
     ...rowVersion(),
@@ -138,7 +147,10 @@ export const patient = pgTable(
      * and a failed search is what causes a duplicate chart to be created — which is a
      * patient-safety problem, because an allergy on chart A is invisible on chart B.
      */
-    index('patient_last_name_trgm_idx').using('gin', sql`${t.legalLastName} gin_trgm_ops`),
+    index('patient_last_name_trgm_idx').using(
+      'gin',
+      sql`${t.legalLastName} gin_trgm_ops`,
+    ),
     index('patient_preferred_name_trgm_idx').using(
       'gin',
       sql`${t.preferredName} gin_trgm_ops`,

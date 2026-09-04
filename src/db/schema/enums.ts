@@ -23,11 +23,7 @@ import { pgEnum } from 'drizzle-orm/pg-core';
  */
 export const roleCode = pgEnum('role_code', ['admin', 'doctor', 'receptionist']);
 
-export const userStatus = pgEnum('user_status', [
-  'active',
-  'suspended',
-  'deactivated',
-]);
+export const userStatus = pgEnum('user_status', ['active', 'suspended', 'deactivated']);
 
 /**
  * Why a session ended. `role_change` and `deactivated` exist because permission changes

@@ -21,13 +21,13 @@ itself. Keep them out.
 
 **Three roles is fewer than a real clinic has.** Real clinics also have nurses/medical
 assistants (who chart but don't prescribe), billing clerks, and a practice manager. The
-MVP doesn't need them, but the *model* should not hardcode three roles into `if`
+MVP doesn't need them, but the _model_ should not hardcode three roles into `if`
 statements — otherwise adding "nurse" later means re-auditing every access check. Model
 roles as data, and check permissions rather than role names.
 
 **The requirement list is a permissions specification in disguise.** Almost every line
 ("view patient contact info, NOT clinical notes") is really a statement about who may see
-which *fields*. Row-level access control is therefore not enough — Cliniqo needs
+which _fields_. Row-level access control is therefore not enough — Cliniqo needs
 field-level scoping, and that boundary needs to live in one place rather than being
 re-derived on each screen.
 
@@ -55,9 +55,9 @@ Ordered roughly by how much damage the ambiguity does if left unresolved.
 **M1. What does "create prescriptions" actually mean?**
 There are two wildly different products hiding behind that line:
 
-- *Record and print.* The prescription is stored in the chart and printed or handed to the
+- _Record and print._ The prescription is stored in the chart and printed or handed to the
   patient. Modest scope.
-- *Electronically transmit to a pharmacy.* Requires the NCPDP SCRIPT standard, membership
+- _Electronically transmit to a pharmacy._ Requires the NCPDP SCRIPT standard, membership
   in a network such as Surescripts, and pharmacy directory integration. For controlled
   substances it additionally requires DEA EPCS compliance: third-party identity proofing of
   every prescriber, hard two-factor at signing time, and audited software.
@@ -86,8 +86,8 @@ per weekday, holidays and closures, appointment types with default durations, an
 per-provider working hours. Scheduling cannot be designed without these.
 
 **M5. Can a doctor edit a note after signing it?**
-"Versioned, not overwritten" is stated, but the clinical concept it maps to is *drafting*
-versus *signing*. Before signing, a note is a working draft. After signing it becomes part
+"Versioned, not overwritten" is stated, but the clinical concept it maps to is _drafting_
+versus _signing_. Before signing, a note is a working draft. After signing it becomes part
 of the legal record, and corrections are **addenda**, not edits — the original stays
 visible. Recommendation: adopt draft / signed / addended explicitly. This is also what
 HIPAA §164.526 (right to amend) expects.
@@ -113,7 +113,7 @@ trusting it.
 correctly blocked from clinical notes — but they book appointments, and a free-text reason
 field will fill up with "follow-up re: HIV meds". That is clinical data sitting in the
 front-desk view, defeating the minimum-necessary boundary you just drew. Recommendation:
-reason becomes a coded appointment *type* chosen from a list, with any free-text detail
+reason becomes a coded appointment _type_ chosen from a list, with any free-text detail
 visible to clinicians only.
 
 **M10. Password reset and account recovery.** Not specified. This is the softest part of
@@ -121,7 +121,7 @@ most auth systems, and there is PHI behind it. Recommendation for the MVP: **no
 self-service reset.** An administrator issues a one-time reset. It is a small clinic, the
 operational burden is trivial, and the attack surface drops to near zero.
 
-**M11. Data retention.** HIPAA sets 6 years for *documentation*, but medical record
+**M11. Data retention.** HIPAA sets 6 years for _documentation_, but medical record
 retention is set by **state** law and is typically 7–10 years for adults — and for minors,
 often until some years past the age of majority. Cliniqo needs a per-state retention policy
 before anything can ever be purged. Until that exists: archive, never purge.
@@ -153,7 +153,7 @@ record — trivial to include now, annoying to backfill.
 ### Scheduling
 
 - **Concurrent double-booking.** Two receptionists booking the same provider and slot at
-  the same moment. An application-level "is this slot free?" check *cannot* prevent this —
+  the same moment. An application-level "is this slot free?" check _cannot_ prevent this —
   both requests read "free" before either writes. It must be enforced by the **database**,
   via a PostgreSQL exclusion constraint over a time range (`btree_gist`, roughly
   `EXCLUDE USING gist (provider_id WITH =, during WITH &&)`). Design the appointment table
@@ -204,7 +204,7 @@ record — trivial to include now, annoying to backfill.
   non-archived rows.
 - Archiving a patient: do their notes, prescriptions, and appointments archive too — and
   can that be reversed as a single operation?
-- Audit log volume. Every *read* is logged, so a busy clinic generates millions of rows.
+- Audit log volume. Every _read_ is logged, so a busy clinic generates millions of rows.
   Needs time-based partitioning and an archival tier, and it must never slow the request
   path enough that somebody proposes turning it off.
 
@@ -328,7 +328,7 @@ is wrong will not be the one anybody thinks to review. One primitive, used every
 one thing to review and one thing to fix.
 
 **Make unaudited access structurally impossible.** The strongest version of this: a single
-data-access module is the *only* code permitted to read patient tables. It takes an actor,
+data-access module is the _only_ code permitted to read patient tables. It takes an actor,
 a target, and a stated purpose; it authorizes, it reads, and it writes the audit row in the
 same transaction. Reading PHI without logging it stops being something a developer can
 forget and becomes something the codebase has no path for. Building this after Phase 3
@@ -344,22 +344,22 @@ written against an access layer that doesn't exist yet, and rewritten once it do
 
 These are not policy footnotes. Each one alters schema, code structure, or infrastructure.
 
-| Requirement | Effect on Cliniqo |
-| --- | --- |
-| **Audit controls** §164.312(b) | Reads are logged, not only writes. Drives the audited-access-layer architecture. |
-| **6-year retention** §164.316(b)(2)(i) | Audit table is append-only, immutable even to administrators, and partitioned by time to stay fast. |
-| **Minimum necessary** §164.502(b) | Field-level scoping, not just row-level. This is why the receptionist view is a different projection of the patient record rather than the same query with parts hidden in the UI. |
-| **Unique user identification** §164.312(a)(2)(i) | No shared accounts. Front-desk workstation UX must make individual login painless, or it will be circumvented. |
-| **Emergency access** §164.312(a)(2)(ii) | Break-glass is *required*, not optional. Needs a real path, a captured reason, and loud logging. |
-| **Automatic logoff** §164.312(a)(2)(iii) | Idle timeout as a first-class session concept, separate from absolute lifetime. |
-| **Encryption** §164.312(a)(2)(iv), §164.312(e) | TLS in transit; encryption at rest for the database **and its backups**. Backups are the most commonly forgotten copy of the PHI. |
-| **Right of access** §164.524 | Patients can demand their record within 30 days. Record export is a compliance requirement, not a nice-to-have. |
-| **Right to amend** §164.526 | Corrections are addenda that preserve the original. This is the reason note versioning exists. |
-| **Accounting of disclosures** §164.528 | Patients may ask who their data was disclosed to, going back 6 years. The audit log must answer this per-patient, which shapes its indexes. |
-| **Breach notification** §164.400–414 | 60-day clock. The log must answer "exactly whose records did this account touch" quickly and defensibly. |
-| **Contingency plan** §164.308(a)(7) | Backups alone are insufficient — a **tested** restore is required. Phase 8 includes an actual restore drill, not just a backup job. |
-| **De-identification** §164.514 | No production PHI in development or test. Requires a synthetic seed-data strategy from Phase 3 onward. |
-| **Business associate agreements** | Every vendor touching PHI needs one: hosting, managed database, error tracking, log aggregation, email, backup storage. This constrains vendor choice before the first deploy, so it belongs in Phase 1 planning. |
+| Requirement                                      | Effect on Cliniqo                                                                                                                                                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Audit controls** §164.312(b)                   | Reads are logged, not only writes. Drives the audited-access-layer architecture.                                                                                                                                  |
+| **6-year retention** §164.316(b)(2)(i)           | Audit table is append-only, immutable even to administrators, and partitioned by time to stay fast.                                                                                                               |
+| **Minimum necessary** §164.502(b)                | Field-level scoping, not just row-level. This is why the receptionist view is a different projection of the patient record rather than the same query with parts hidden in the UI.                                |
+| **Unique user identification** §164.312(a)(2)(i) | No shared accounts. Front-desk workstation UX must make individual login painless, or it will be circumvented.                                                                                                    |
+| **Emergency access** §164.312(a)(2)(ii)          | Break-glass is _required_, not optional. Needs a real path, a captured reason, and loud logging.                                                                                                                  |
+| **Automatic logoff** §164.312(a)(2)(iii)         | Idle timeout as a first-class session concept, separate from absolute lifetime.                                                                                                                                   |
+| **Encryption** §164.312(a)(2)(iv), §164.312(e)   | TLS in transit; encryption at rest for the database **and its backups**. Backups are the most commonly forgotten copy of the PHI.                                                                                 |
+| **Right of access** §164.524                     | Patients can demand their record within 30 days. Record export is a compliance requirement, not a nice-to-have.                                                                                                   |
+| **Right to amend** §164.526                      | Corrections are addenda that preserve the original. This is the reason note versioning exists.                                                                                                                    |
+| **Accounting of disclosures** §164.528           | Patients may ask who their data was disclosed to, going back 6 years. The audit log must answer this per-patient, which shapes its indexes.                                                                       |
+| **Breach notification** §164.400–414             | 60-day clock. The log must answer "exactly whose records did this account touch" quickly and defensibly.                                                                                                          |
+| **Contingency plan** §164.308(a)(7)              | Backups alone are insufficient — a **tested** restore is required. Phase 8 includes an actual restore drill, not just a backup job.                                                                               |
+| **De-identification** §164.514                   | No production PHI in development or test. Requires a synthetic seed-data strategy from Phase 3 onward.                                                                                                            |
+| **Business associate agreements**                | Every vendor touching PHI needs one: hosting, managed database, error tracking, log aggregation, email, backup storage. This constrains vendor choice before the first deploy, so it belongs in Phase 1 planning. |
 
 ---
 
