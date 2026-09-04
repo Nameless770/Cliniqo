@@ -1,0 +1,188 @@
+/**
+ * All PostgreSQL enum types, in one place.
+ *
+ * These are database-level enums rather than free text so that an invalid state is
+ * rejected by the database, not merely by whichever code path happened to validate.
+ *
+ * Adding a value to a pg enum is an online operation (`ALTER TYPE ... ADD VALUE`).
+ * Removing one is not — it requires a type swap — so err toward fewer, broader values.
+ */
+
+import { pgEnum } from 'drizzle-orm/pg-core';
+
+/* -------------------------------------------------------------------------- */
+/* Identity and access                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The three MVP roles.
+ *
+ * This enum constrains which role rows may exist; it is NOT what authorization checks
+ * read. Checks resolve permissions through role_permission, so adding a fourth role
+ * later is a seed-data change rather than a hunt for `=== 'doctor'` across the codebase.
+ */
+export const roleCode = pgEnum('role_code', ['admin', 'doctor', 'receptionist']);
+
+export const userStatus = pgEnum('user_status', [
+  'active',
+  'suspended',
+  'deactivated',
+]);
+
+/**
+ * Why a session ended. `role_change` and `deactivated` exist because permission changes
+ * must take effect immediately — a deactivated employee must not keep access until
+ * their token happens to expire.
+ */
+export const sessionRevokedReason = pgEnum('session_revoked_reason', [
+  'logout',
+  'idle_timeout',
+  'absolute_timeout',
+  'role_change',
+  'deactivated',
+  'admin_revoke',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* Patient                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Sex assigned at birth. Clinically load-bearing (reference ranges, screening
+ * eligibility) and deliberately separate from `patient.gender_identity`, which is free
+ * text because it is not an enumerable clinical variable.
+ */
+export const sexAssignedAtBirth = pgEnum('sex_assigned_at_birth', [
+  'male',
+  'female',
+  'intersex',
+  'unknown',
+]);
+
+export const allergenType = pgEnum('allergen_type', [
+  'drug',
+  'food',
+  'environmental',
+  'other',
+]);
+
+export const allergySeverity = pgEnum('allergy_severity', [
+  'mild',
+  'moderate',
+  'severe',
+  'life_threatening',
+]);
+
+/**
+ * `entered_in_error` is how clinical systems retract mistaken data. It is not a delete:
+ * the row stays, visibly marked, because "this was recorded and later retracted" is
+ * itself part of the record.
+ */
+export const clinicalRecordStatus = pgEnum('clinical_record_status', [
+  'active',
+  'inactive',
+  'entered_in_error',
+]);
+
+export const patientFlagType = pgEnum('patient_flag_type', [
+  'clinical_alert',
+  'infection_control',
+  'fall_risk',
+  'safeguarding',
+  'other',
+]);
+
+export const flagSeverity = pgEnum('flag_severity', ['info', 'warning', 'critical']);
+
+/* -------------------------------------------------------------------------- */
+/* Scheduling                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `cancelled` and `no_show` are distinct states, and the partial exclusion constraint in
+ * migration 0001 excludes both — otherwise a cancelled appointment would block its slot
+ * forever.
+ */
+export const appointmentStatus = pgEnum('appointment_status', [
+  'booked',
+  'checked_in',
+  'in_progress',
+  'completed',
+  'cancelled',
+  'no_show',
+]);
+
+/** Clinic-wide closure vs. one provider's time off, in a single table. */
+export const scheduleExceptionKind = pgEnum('schedule_exception_kind', [
+  'closure',
+  'time_off',
+  'blocked',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* Clinical documentation                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const visitNoteStatus = pgEnum('visit_note_status', [
+  'draft',
+  'signed',
+  'amended',
+]);
+
+/**
+ * A version is a mutable draft, a frozen signed version, or an addendum.
+ *
+ * After signing, nothing is ever updated — corrections append an addendum and the
+ * original stays readable (§164.526).
+ */
+export const visitNoteVersionKind = pgEnum('visit_note_version_kind', [
+  'draft',
+  'signed',
+  'addendum',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* Prescribing                                                                */
+/* -------------------------------------------------------------------------- */
+
+export const prescriptionStatus = pgEnum('prescription_status', [
+  'draft',
+  'signed',
+  'printed',
+  'cancelled',
+]);
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const auditOutcome = pgEnum('audit_outcome', ['allowed', 'denied', 'error']);
+
+/**
+ * The object dimension of an audit event.
+ *
+ * A constrained enum rather than free text because `audit_event.entity_id` carries no
+ * foreign key (it points at many tables — see the data model doc, §10), so this enum is
+ * the only structural guarantee that the reference is interpretable.
+ */
+export const auditEntityType = pgEnum('audit_entity_type', [
+  'patient',
+  'patient_allergy',
+  'patient_flag',
+  'appointment',
+  'visit_note',
+  'visit_note_version',
+  'prescription',
+  'prescription_item',
+  'user_account',
+  'user_role',
+  'session',
+  'clinic',
+  'break_glass_grant',
+]);
+
+export const breakGlassReviewOutcome = pgEnum('break_glass_review_outcome', [
+  'pending',
+  'justified',
+  'not_justified',
+]);
