@@ -1,39 +1,13 @@
+@import '../styles/tokens.css';
+
 /*
- * Global baseline only.
- *
- * Cliniqo has no CSS framework installed yet — that is a deliberate open decision, not
- * an oversight. CLAUDE.md requires asking before adding a dependency, and a styling
- * system is a large, hard-to-reverse one. Tailwind is the obvious candidate when UI work
- * starts in a later phase.
- *
- * Component styles live in CSS Modules next to their component until then.
+ * Global baseline. Component styling lives in CSS Modules beside each component —
+ * no framework, so the visual identity is ours rather than a recognisable default.
  */
 
-:root {
-  color-scheme: light dark;
-
-  /* Placeholder tokens. Replaced when the brand identity is designed. */
-  --color-bg: #ffffff;
-  --color-fg: #16181d;
-  --color-muted: #5b6472;
-  --color-border: #e2e5ea;
-  --color-accent: #1f6f6b;
-
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #101317;
-    --color-fg: #e8eaed;
-    --color-muted: #99a1ad;
-    --color-border: #262b33;
-    --color-accent: #4bb3ac;
-  }
-}
-
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -43,20 +17,98 @@ body {
   padding: 0;
 }
 
+html {
+  /* Never below 16px on the root: browser zoom and user font-size settings scale from
+     it, and staff who enlarge text must get larger text, not a broken layout. */
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  background: var(--color-bg);
-  color: var(--color-fg);
+  background: var(--bg-page);
+  color: var(--text-primary);
   font-family: var(--font-sans);
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
   -webkit-font-smoothing: antialiased;
 }
 
-a {
-  color: var(--color-accent);
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  line-height: var(--leading-tight);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
 }
 
-/* Never remove focus indicators. Staff work these screens at speed, often by keyboard. */
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--text-brand);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * One focus style for the whole app.
+ *
+ * :focus-visible so pointer users don't see rings, keyboard users always do. Staff work
+ * these screens fast and by keyboard; a missing focus ring is a lost booking.
+ */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Numeric columns must align: MRNs, dates, doses, quantities. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visually hidden but available to screen readers. */
+.srOnly,
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * Vestibular safety. Motion is decoration here; nothing depends on it, so it can all go.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Windows High Contrast / forced-colors: let the OS palette win, keep focus visible. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText;
+  }
 }

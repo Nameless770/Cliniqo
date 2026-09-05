@@ -1,0 +1,230 @@
+/*
+ * Cliniqo design tokens
+ * =====================
+ *
+ * Original identity. The palette is built around a deep pine-teal rather than the
+ * default SaaS blue or the pale "hospital blue" every EHR reaches for — it reads as
+ * clinical without reading as cold, and it is distinct enough that a screenshot is
+ * recognisably Cliniqo.
+ *
+ * Three rules this file follows:
+ *
+ * 1. Neutrals are WARM (a touch of yellow-red in the hue). Pure grey plus white is what
+ *    makes clinical software feel like a spreadsheet. Staff look at these screens for
+ *    eight-hour shifts.
+ *
+ * 2. Every foreground/background pair used for text meets WCAG AA (4.5:1 body, 3:1 for
+ *    large text and UI boundaries) in BOTH themes. Verified by scripts/check-contrast.js,
+ *    not by eye.
+ *
+ * 3. Status is never colour alone. Every status token has a paired icon or text label in
+ *    the component that uses it. "Life-threatening allergy" must not depend on the
+ *    reader distinguishing red from amber.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------- palette */
+  /* Pine — brand primary */
+  --pine-50: #eef6f5;
+  --pine-100: #d5e8e6;
+  --pine-200: #aad2ce;
+  --pine-300: #79b6b1;
+  --pine-400: #4a948f;
+  --pine-500: #2b7873;
+  --pine-600: #1a625d;
+  --pine-700: #144d49;
+  --pine-800: #103c39;
+  --pine-900: #0b2c2a;
+
+  /* Warm neutrals */
+  --sand-0: #ffffff;
+  --sand-25: #fbfaf8;
+  --sand-50: #f6f4f1;
+  --sand-100: #edeae5;
+  --sand-200: #ddd9d2;
+  --sand-300: #c2bcb2;
+  --sand-400: #98928a;
+  --sand-500: #736e66;
+  --sand-600: #575350;
+  --sand-700: #423f3c;
+  --sand-800: #2c2a28;
+  --sand-900: #1b1a19;
+  --sand-950: #111010;
+
+  /* Functional — deliberately different hues from pine so status never blurs into brand */
+  --success-50: #eaf5ea;
+  --success-600: #2d7233;
+  --success-700: #235a28;
+  --warn-50: #fdf3e6;
+  --warn-600: #96530b;
+  --warn-700: #7a4309;
+  --danger-50: #fdedeb;
+  --danger-600: #b03027;
+  --danger-700: #8e241d;
+  --info-50: #eaf1fd;
+  --info-600: #1f56b8;
+  --info-700: #194593;
+
+  /* ------------------------------------------------------------- semantic */
+  --bg-page: var(--sand-50);
+  --bg-surface: var(--sand-0);
+  --bg-raised: var(--sand-0);
+  --bg-sunken: var(--sand-100);
+  --bg-hover: var(--sand-100);
+  --bg-active: var(--sand-200);
+  --bg-overlay: rgb(27 26 25 / 55%);
+
+  --text-primary: var(--sand-900);
+  --text-secondary: var(--sand-600);
+  --text-muted: var(--sand-500);
+  --text-inverse: var(--sand-0);
+  --text-brand: var(--pine-700);
+
+  /* subtle = decorative rules and dividers; no contrast minimum applies */
+  --border-subtle: var(--sand-200);
+  /* default = the visible edge of an input or control. WCAG 1.4.11 requires 3:1, so
+     this is a step darker than it "looks nice" at — a border you cannot find is a
+     control you cannot find. */
+  --border-default: var(--sand-400);
+  --border-strong: var(--sand-500);
+
+  --brand-solid: var(--pine-600);
+  --brand-solid-hover: var(--pine-700);
+  --brand-solid-active: var(--pine-800);
+  --brand-soft: var(--pine-50);
+  --brand-text-on-solid: var(--sand-0);
+
+  --status-success-text: var(--success-700);
+  --status-success-bg: var(--success-50);
+  --status-warn-text: var(--warn-700);
+  --status-warn-bg: var(--warn-50);
+  --status-danger-text: var(--danger-700);
+  --status-danger-bg: var(--danger-50);
+  --status-info-text: var(--info-700);
+  --status-info-bg: var(--info-50);
+
+  --focus-ring: var(--pine-500);
+  --focus-ring-offset: var(--bg-surface);
+
+  /* ---------------------------------------------------------- typography */
+  /*
+   * System fonts, no webfont.
+   *
+   * Not a performance choice: loading a font from a third-party CDN means every page
+   * that renders a patient chart also makes a request to a vendor with no BAA. Self-
+   * hosting would be acceptable; system fonts make the question moot.
+   */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-2xs: 0.6875rem; /* 11px — dense table metadata only */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.8125rem; /* 13px — table body */
+  --text-base: 0.875rem; /* 14px — UI default; clinical tools are dense */
+  --text-md: 1rem; /* 16px — prose, note bodies */
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65; /* note bodies — long-form clinical text */
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* ------------------------------------------------------------- spacing */
+  /* 4px base. Named by step, not by pixel, so the scale can be retuned once. */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* --------------------------------------------------------------- shape */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  --shadow-sm: 0 1px 2px rgb(27 26 25 / 6%);
+  --shadow-md: 0 2px 4px rgb(27 26 25 / 8%), 0 1px 2px rgb(27 26 25 / 5%);
+  --shadow-lg: 0 8px 24px rgb(27 26 25 / 12%), 0 2px 6px rgb(27 26 25 / 6%);
+
+  /* --------------------------------------------------------------- other */
+  --shell-topbar-height: 3.25rem;
+  --shell-nav-width: 13.5rem;
+  --content-max-width: 82rem;
+
+  --duration-fast: 100ms;
+  --duration-base: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  --z-nav: 10;
+  --z-dialog: 100;
+  --z-toast: 200;
+}
+
+/*
+ * Dark theme.
+ *
+ * Night shifts are real in clinical work. Only the semantic layer flips — the palette
+ * scales stay put — so a component never needs to know which theme it is in.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --bg-page: var(--sand-950);
+    --bg-surface: #1a1918;
+    --bg-raised: #232120;
+    --bg-sunken: #131211;
+    --bg-hover: #2a2827;
+    --bg-active: #333130;
+    --bg-overlay: rgb(0 0 0 / 65%);
+
+    --text-primary: var(--sand-50);
+    --text-secondary: var(--sand-300);
+    --text-muted: var(--sand-400);
+    --text-inverse: var(--sand-950);
+    --text-brand: var(--pine-200);
+
+    --border-subtle: #302e2c;
+    --border-default: #6b6763;
+    --border-strong: #7d7975;
+
+    --brand-solid: var(--pine-400);
+    --brand-solid-hover: var(--pine-300);
+    --brand-solid-active: var(--pine-200);
+    --brand-soft: #16302e;
+    --brand-text-on-solid: var(--sand-950);
+
+    --status-success-text: #7fc785;
+    --status-success-bg: #16281a;
+    --status-warn-text: #e0a95f;
+    --status-warn-bg: #2c1e0a;
+    --status-danger-text: #f2938a;
+    --status-danger-bg: #2e1512;
+    --status-info-text: #92b4f4;
+    --status-info-bg: #131f36;
+
+    --focus-ring: var(--pine-300);
+    --focus-ring-offset: var(--bg-surface);
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 2px 4px rgb(0 0 0 / 45%), 0 1px 2px rgb(0 0 0 / 30%);
+    --shadow-lg: 0 8px 24px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 35%);
+  }
+}

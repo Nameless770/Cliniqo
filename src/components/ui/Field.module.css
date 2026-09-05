@@ -1,0 +1,39 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+}
+
+.required {
+  color: var(--danger-600);
+  margin-inline-start: 0.15em;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/*
+ * Errors carry an icon as well as colour. A red border alone is invisible to a
+ * red-green colourblind user, and this form books appointments and records doses.
+ */
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--status-danger-text);
+  font-weight: var(--weight-medium);
+}
+
+.errorIcon {
+  flex-shrink: 0;
+  margin-top: 0.15em;
+}

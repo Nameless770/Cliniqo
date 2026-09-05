@@ -10,6 +10,10 @@
 
 import { pgEnum } from 'drizzle-orm/pg-core';
 
+// Relative, not aliased: drizzle-kit bundles this file with its own resolver and does
+// not read tsconfig paths.
+import { ROLE_CODES } from '../../lib/roles';
+
 /* -------------------------------------------------------------------------- */
 /* Identity and access                                                        */
 /* -------------------------------------------------------------------------- */
@@ -21,7 +25,7 @@ import { pgEnum } from 'drizzle-orm/pg-core';
  * read. Checks resolve permissions through role_permission, so adding a fourth role
  * later is a seed-data change rather than a hunt for `=== 'doctor'` across the codebase.
  */
-export const roleCode = pgEnum('role_code', ['admin', 'doctor', 'receptionist']);
+export const roleCode = pgEnum('role_code', ROLE_CODES);
 
 export const userStatus = pgEnum('user_status', ['active', 'suspended', 'deactivated']);
 

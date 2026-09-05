@@ -1,0 +1,149 @@
+/* ---------------------------------------------------------------- empty state */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  padding: var(--space-12) var(--space-6);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.emptyIcon {
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.emptyTitle {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.emptyBody {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 40ch;
+}
+
+.emptyAction {
+  margin-top: var(--space-3);
+}
+
+/* ------------------------------------------------------------------- spinner */
+.spinner {
+  display: inline-block;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--brand-solid);
+  border-radius: 50%;
+  animation: spin 650ms linear infinite;
+}
+
+.spinnerSm {
+  width: 1rem;
+  height: 1rem;
+}
+.spinnerMd {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.spinnerLg {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-width: 3px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------------ skeleton */
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--bg-sunken) 25%,
+    var(--bg-hover) 37%,
+    var(--bg-sunken) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
+}
+
+/* Reduced motion: hold a flat placeholder rather than pulsing it. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--bg-sunken);
+  }
+}
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* --------------------------------------------------------------------- badge */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.badgeNeutral {
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+}
+.badgeSuccess {
+  background: var(--status-success-bg);
+  color: var(--status-success-text);
+}
+.badgeWarning {
+  background: var(--status-warn-bg);
+  color: var(--status-warn-text);
+}
+.badgeDanger {
+  background: var(--status-danger-bg);
+  color: var(--status-danger-text);
+}
+.badgeInfo {
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+}
+
+.badgeDot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}

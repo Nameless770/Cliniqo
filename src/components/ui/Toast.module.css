@@ -1,0 +1,100 @@
+.region {
+  position: fixed;
+  bottom: var(--space-4);
+  inset-inline-end: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(24rem, calc(100vw - var(--space-8)));
+  /* The region must not swallow clicks on the page behind it. */
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-inline-start-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-lg);
+  animation: slide-in var(--duration-base) var(--ease);
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Colour on the edge, icon in the body, word in the label — three channels, never one. */
+.success {
+  border-inline-start-color: var(--success-600);
+}
+.error {
+  border-inline-start-color: var(--danger-600);
+}
+.warning {
+  border-inline-start-color: var(--warn-600);
+}
+.info {
+  border-inline-start-color: var(--info-600);
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.success .icon {
+  color: var(--status-success-text);
+}
+.error .icon {
+  color: var(--status-danger-text);
+}
+.warning .icon {
+  color: var(--status-warn-text);
+}
+.info .icon {
+  color: var(--status-info-text);
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.message {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.dismiss {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

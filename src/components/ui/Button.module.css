@@ -1,0 +1,108 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+
+.button:disabled,
+.button[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* --- sizes. Minimum 32px tall; 40px for primary actions so touch targets hold up
+   on the tablets used at check-in desks. --- */
+.sm {
+  min-height: 2rem;
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+.md {
+  min-height: 2.25rem;
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+.lg {
+  min-height: 2.5rem;
+  padding: 0 var(--space-5);
+  font-size: var(--text-md);
+}
+
+/* --- variants --- */
+.primary {
+  background: var(--brand-solid);
+  color: var(--brand-text-on-solid);
+}
+.primary:hover:not(:disabled) {
+  background: var(--brand-solid-hover);
+}
+.primary:active:not(:disabled) {
+  background: var(--brand-solid-active);
+}
+
+.secondary {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+.secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/*
+ * Destructive actions. Colour is a reinforcement, never the only signal — the label
+ * always says what will happen ("Archive patient", not "Confirm").
+ */
+.danger {
+  background: var(--danger-600);
+  color: #ffffff;
+}
+.danger:hover:not(:disabled) {
+  background: var(--danger-700);
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+/* Spinner shown while a submit is in flight. */
+.spinner {
+  width: 0.875em;
+  height: 0.875em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (forced-colors: active) {
+  .button {
+    border: 1px solid ButtonText;
+  }
+}

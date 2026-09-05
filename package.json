@@ -21,7 +21,8 @@
     "db:studio": "drizzle-kit studio",
     "db:setup": "npm run db:migrate && docker exec cliniqo-postgres psql -U cliniqo_owner -d cliniqo -c \"ALTER ROLE cliniqo_app WITH PASSWORD 'localtest'\"",
     "db:reset": "docker compose down -v && docker compose up -d && node ./scripts/wait-for-db.js && npm run db:setup",
-    "verify": "npm run typecheck && npm run lint && npm run db:check"
+    "verify": "npm run typecheck && npm run lint && npm run check:contrast && npm run db:check",
+    "check:contrast": "node scripts/check-contrast.js"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

@@ -1,0 +1,55 @@
+.control {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  transition: border-color var(--duration-fast) var(--ease);
+}
+
+.control::placeholder {
+  color: var(--text-muted);
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.control:disabled {
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/*
+ * Invalid state: a thicker, darker border AND the error message beneath with its icon.
+ * Two channels, never colour alone.
+ */
+.control[aria-invalid='true'] {
+  border-color: var(--danger-600);
+  border-width: 2px;
+  /* Compensate so the control does not shift by 1px when the error appears. */
+  padding: calc(var(--space-2) - 1px) calc(var(--space-3) - 1px);
+}
+
+.textarea {
+  min-height: 6rem;
+  resize: vertical;
+  line-height: var(--leading-relaxed);
+}
+
+.select {
+  appearance: none;
+  padding-inline-end: var(--space-8);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% + 2px),
+    calc(100% - 13px) calc(50% + 2px);
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
