@@ -1,0 +1,2 @@
+DROP INDEX "user_account_clinic_email_live_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "user_account_email_live_idx" ON "user_account" USING btree ("email") WHERE "user_account"."archived_at" is null;

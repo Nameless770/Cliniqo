@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { ToastProvider } from '@/components/ui';
 import { ROLE_LABELS, type RoleCode } from '@/lib/roles';
+import { logout } from '@/server/actions/auth';
 
 import { Nav } from './Nav';
 import styles from './AppShell.module.css';
@@ -88,11 +89,7 @@ export function AppShell({ userName, roles, clinicName, children }: AppShellProp
 
           <div className={styles.topbarSpacer} />
 
-          {/*
-            Account menu. A plain button until sessions exist (phase 2); it will open a
-            menu with sign-out and the idle-timeout indicator.
-          */}
-          <button type="button" className={styles.account}>
+          <div className={styles.account}>
             <span className={styles.avatar} aria-hidden="true">
               {initials(userName)}
             </span>
@@ -100,7 +97,20 @@ export function AppShell({ userName, roles, clinicName, children }: AppShellProp
               <span>{userName}</span>
               <span className={styles.accountRole}>{roleLabel}</span>
             </span>
-          </button>
+          </div>
+
+          {/*
+            Sign out is a FORM, not a link.
+            A GET link can be triggered by any <img> tag or prefetch, which turns
+            logout into a trivial denial-of-service against a working clinician. State
+            changes belong behind a POST, and this one carries Next's server-action
+            Origin check with it.
+          */}
+          <form action={logout}>
+            <button type="submit" className={styles.signOut}>
+              Sign out
+            </button>
+          </form>
         </header>
 
         <div className={styles.body}>

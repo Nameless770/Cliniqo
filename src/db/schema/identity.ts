@@ -86,9 +86,11 @@ export const userAccount = pgTable(
     email: citext('email').notNull(),
 
     /**
-     * Argon2id encoded hash. Parameters live inside the encoded string, so raising the
-     * cost factor later does not need a schema change — existing hashes stay verifiable
-     * and are upgraded on next successful login.
+     * Encoded password hash, self-describing: `scrypt$N$r$p$salt$hash`.
+     *
+     * The algorithm and its cost parameters live inside the string, so hardening the
+     * parameters — or migrating to Argon2id — needs no schema change: old hashes stay
+     * verifiable and are silently re-hashed on the owner's next successful login.
      */
     passwordHash: text('password_hash').notNull(),
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
@@ -113,11 +115,19 @@ export const userAccount = pgTable(
   },
   (t) => [
     /**
-     * Partial: an archived account must not permanently reserve an address. Contrast
+     * GLOBAL, not per-clinic.
+     *
+     * Login is `email + password` with no clinic selector, so the address has to resolve
+     * to exactly one account. Scoping this to (clinic_id, email) would let two clinics
+     * hold the same address and make the lookup ambiguous — which resolves either by
+     * asking the user which clinic they belong to (leaking that an address exists
+     * somewhere) or by picking one, which is worse.
+     *
+     * Partial, so an archived account does not permanently reserve an address. Contrast
      * with `patient.mrn`, whose uniqueness deliberately spans archived rows.
      */
-    uniqueIndex('user_account_clinic_email_live_idx')
-      .on(t.clinicId, t.email)
+    uniqueIndex('user_account_email_live_idx')
+      .on(t.email)
       .where(sql`${t.archivedAt} is null`),
     index('user_account_clinic_status_idx').on(t.clinicId, t.status),
   ],

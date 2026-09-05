@@ -1,16 +1,50 @@
+import { redirect } from 'next/navigation';
+
+import { getSession } from '@/server/auth/session';
+
+import { LoginForm } from './LoginForm';
+
 /**
- * Placeholder. Authentication is phase 2 — see docs/01-requirements-analysis.md §6.
+ * Sign-in.
  *
- * When implemented, this page renders a Server Component form posting to a server action
- * in src/server/actions/auth. Credentials are never handled in a Client Component.
+ * A Server Component that renders the form island. There is no self-registration link:
+ * accounts are created by an administrator (phase 8), which is what keeps
+ * §164.312(a)(2)(i) — one account per identified human — enforceable.
  */
-export default function LoginPage() {
+export const metadata = { title: 'Sign in · Cliniqo' };
+
+export default async function LoginPage() {
+  // Already signed in — don't show a login form to an authenticated user.
+  if (await getSession()) redirect('/dashboard');
+
   return (
     <section style={{ maxWidth: '22rem', width: '100%' }}>
-      <h1 style={{ fontSize: '1.5rem', margin: '0 0 0.5rem' }}>Cliniqo</h1>
-      <p style={{ color: 'var(--color-muted)', margin: 0 }}>
-        Sign-in is not implemented yet. Authentication and session management land in
-        phase 2, alongside the authorization primitive and the audit log.
+      <div style={{ marginBottom: 'var(--space-6)' }}>
+        <h1 style={{ fontSize: 'var(--text-xl)', marginBottom: 'var(--space-1)' }}>
+          Sign in to Cliniqo
+        </h1>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 'var(--text-sm)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          Staff accounts only.
+        </p>
+      </div>
+
+      <LoginForm />
+
+      <p
+        style={{
+          marginTop: 'var(--space-6)',
+          fontSize: 'var(--text-xs)',
+          color: 'var(--text-muted)',
+        }}
+      >
+        Accounts are issued by a clinic administrator. If you cannot sign in, contact them
+        directly — there is no self-service password reset.
       </p>
     </section>
   );
