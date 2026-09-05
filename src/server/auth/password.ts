@@ -47,6 +47,22 @@ const SALT_LENGTH = 16;
 /** node:crypto caps scrypt memory at 32 MB by default, well below what N=2^16 needs. */
 const MAX_MEM = 128 * N * R * 2;
 
+/**
+ * An account that has no password yet.
+ *
+ * Django's convention: a value the encoder can never produce, so it cannot be matched by
+ * any input. Used for staff accounts created by an administrator, which are claimed via a
+ * single-use setup token rather than a password the administrator chooses.
+ *
+ * `password_hash` stays NOT NULL: a nullable credential column invites a code path that
+ * treats "no password" as "no check".
+ */
+export const UNUSABLE_PASSWORD = '!';
+
+export function isPasswordSet(encoded: string): boolean {
+  return encoded !== UNUSABLE_PASSWORD && parse(encoded) !== null;
+}
+
 /** `scrypt$N$r$p$salt$hash` — self-describing, so parameters can change over time. */
 function encode(salt: Buffer, derived: Buffer): string {
   return [ALGORITHM, N, R, P, salt.toString('base64'), derived.toString('base64')].join(
@@ -105,7 +121,20 @@ export async function verifyPassword(
   encoded: string,
 ): Promise<boolean> {
   const parsed = parse(encoded);
-  if (!parsed) return false;
+
+  /*
+   * An unparseable hash — including UNUSABLE_PASSWORD — still costs a full derivation
+   * before failing.
+   *
+   * Returning immediately would make an account awaiting setup measurably faster to probe
+   * than one with a real password, which turns the login form into an oracle for "this
+   * address exists and has not been claimed yet". That is exactly the account worth
+   * attacking, because claiming it grants access.
+   */
+  if (!parsed) {
+    await verifyPassword(password, await decoyHash());
+    return false;
+  }
 
   try {
     const derived = await scrypt(

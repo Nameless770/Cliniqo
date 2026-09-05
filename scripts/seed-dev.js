@@ -37,7 +37,9 @@ async function hashPassword(password) {
     p: P,
     maxmem: 128 * N * R * 2,
   });
-  return ['scrypt', N, R, P, salt.toString('base64'), derived.toString('base64')].join('$');
+  return ['scrypt', N, R, P, salt.toString('base64'), derived.toString('base64')].join(
+    '$',
+  );
 }
 
 /* ------------------------------------------------------------------ guards */
@@ -108,7 +110,9 @@ try {
     if (existing.rowCount > 0) {
       await client.query('ROLLBACK');
       console.log(`[seed] ${ADMIN_EMAIL} already exists. Nothing to do.`);
-      console.log('[seed] To reset the password, use `npm run db:reset` then seed again.');
+      console.log(
+        '[seed] To reset the password, use `npm run db:reset` then seed again.',
+      );
       process.exit(0);
     }
 

@@ -19,6 +19,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 import { clinic } from './clinic';
@@ -96,6 +97,18 @@ export const prescription = pgTable(
     signedAt: timestamp('signed_at', { withTimezone: true }),
     printedAt: timestamp('printed_at', { withTimezone: true }),
 
+    /**
+     * The prescription this one replaces.
+     *
+     * A signed prescription is never edited. A correction is a NEW prescription pointing
+     * back at the original, and the original is cancelled with a reason — which is how
+     * paper prescribing works, and what makes "what was actually prescribed, and when did
+     * it change" answerable from the record rather than from memory.
+     */
+    supersedesPrescriptionId: uuid('supersedes_prescription_id').references(
+      (): AnyPgColumn => prescription.id,
+    ),
+
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     cancelledBy: uuid('cancelled_by').references(() => userAccount.id),
     cancellationReason: text('cancellation_reason'),
@@ -106,6 +119,10 @@ export const prescription = pgTable(
   },
   (t) => [
     index('prescription_patient_signed_idx').on(t.patientId, t.signedAt.desc()),
+    /** Walking a correction chain: "what replaced this?" */
+    index('prescription_supersedes_idx')
+      .on(t.supersedesPrescriptionId)
+      .where(sql`${t.supersedesPrescriptionId} is not null`),
     index('prescription_prescriber_draft_idx')
       .on(t.prescriberUserId)
       .where(sql`${t.status} = 'draft'`),

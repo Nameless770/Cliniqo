@@ -96,7 +96,11 @@ type Inserter = {
   insert: ReturnType<typeof getDb>['insert'];
 };
 
-export function buildSessionRow(userId: string, ip: string | null, userAgent: string | null) {
+export function buildSessionRow(
+  userId: string,
+  ip: string | null,
+  userAgent: string | null,
+) {
   const env = getEnv();
   const now = Date.now();
   const token = generateToken();
@@ -138,6 +142,8 @@ export type ActiveSession = {
   userId: string;
   clinicId: string;
   clinicName: string;
+  /** IANA zone. Schedule boundaries are computed in this, never the server's zone. */
+  clinicTimeZone: string;
   email: string;
   fullName: string;
   mustChangePassword: boolean;
@@ -172,6 +178,7 @@ export const getSession = cache(async (): Promise<ActiveSession | null> => {
       userId: userAccount.id,
       clinicId: userAccount.clinicId,
       clinicName: clinic.name,
+      clinicTimeZone: clinic.timezone,
       email: userAccount.email,
       fullName: userAccount.fullName,
       status: userAccount.status,
@@ -230,7 +237,9 @@ export const getSession = cache(async (): Promise<ActiveSession | null> => {
       .update(session)
       .set({
         lastSeenAt: now,
-        idleExpiresAt: new Date(now.getTime() + env.SESSION_IDLE_TIMEOUT_MINUTES * 60_000),
+        idleExpiresAt: new Date(
+          now.getTime() + env.SESSION_IDLE_TIMEOUT_MINUTES * 60_000,
+        ),
       })
       .where(eq(session.id, row.sessionId));
   }
@@ -240,6 +249,7 @@ export const getSession = cache(async (): Promise<ActiveSession | null> => {
     userId: row.userId,
     clinicId: row.clinicId,
     clinicName: row.clinicName,
+    clinicTimeZone: row.clinicTimeZone,
     email: row.email,
     fullName: row.fullName,
     mustChangePassword: row.mustChangePassword,
@@ -267,7 +277,13 @@ export async function requireSession(): Promise<ActiveSession> {
 
 export async function revokeSession(
   sessionId: string,
-  reason: 'logout' | 'idle_timeout' | 'absolute_timeout' | 'role_change' | 'deactivated' | 'admin_revoke',
+  reason:
+    | 'logout'
+    | 'idle_timeout'
+    | 'absolute_timeout'
+    | 'role_change'
+    | 'deactivated'
+    | 'admin_revoke',
 ): Promise<void> {
   await getDb()
     .update(session)
@@ -298,7 +314,10 @@ export async function revokeAllSessionsForUser(
  * overwrites it — otherwise per-IP limiting is bypassed by sending a header. Noted here
  * because it is an infrastructure requirement that looks like an application detail.
  */
-export async function requestMeta(): Promise<{ ip: string | null; userAgent: string | null }> {
+export async function requestMeta(): Promise<{
+  ip: string | null;
+  userAgent: string | null;
+}> {
   const h = await headers();
   const forwarded = h.get('x-forwarded-for');
   const ip = forwarded?.split(',')[0]?.trim() ?? h.get('x-real-ip') ?? null;

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { Db } from '@/db/client';
+import type { AuditAction } from './actions';
 import { auditEvent } from '@/db/schema';
 import { uuidv7 } from '@/lib/uuidv7';
 
@@ -38,7 +39,8 @@ export type AuditEntityType =
   | 'user_role'
   | 'session'
   | 'clinic'
-  | 'break_glass_grant';
+  | 'break_glass_grant'
+  | 'audit_event';
 
 export type AuditInput = {
   clinicId: string;
@@ -48,8 +50,11 @@ export type AuditInput = {
   actorIp?: string | null;
   actorUserAgent?: string | null;
   sessionId?: string | null;
-  /** Dotted verb: `auth.login`, `patient.read`, `note.sign`. */
-  action: string;
+  /**
+   * A member of the closed action union. Not a string: free-text actions drift across
+   * pull requests until "who accessed this record" is no longer answerable by query.
+   */
+  action: AuditAction;
   outcome: 'allowed' | 'denied' | 'error';
   /**
    * Whose PHI was touched. Populate on EVERY event that touches patient data, even when

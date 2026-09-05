@@ -104,7 +104,7 @@ export const flagSeverity = pgEnum('flag_severity', ['info', 'warning', 'critica
  * forever.
  */
 export const appointmentStatus = pgEnum('appointment_status', [
-  'booked',
+  'scheduled',
   'checked_in',
   'in_progress',
   'completed',
@@ -179,6 +179,8 @@ export const auditEntityType = pgEnum('audit_entity_type', [
   'session',
   'clinic',
   'break_glass_grant',
+  /* Reading the audit log is itself an audited event, and its object is the log. */
+  'audit_event',
 ]);
 
 export const breakGlassReviewOutcome = pgEnum('break_glass_review_outcome', [

@@ -1,0 +1,23 @@
+-- ---------------------------------------------------------------------------
+-- 0007 — intentionally empty.
+--
+-- drizzle-kit generated a drop-and-recreate of "appointment_status" here because its
+-- SNAPSHOT still held the pre-rename member list. The DATABASE was already correct:
+-- migration 0006 renamed 'booked' -> 'scheduled' with ALTER TYPE ... RENAME VALUE, which
+-- preserves the member OID, so both the partial index and the GiST exclusion constraint
+-- followed the rename automatically. Verified against the live database:
+--
+--   enum:  scheduled, checked_in, in_progress, completed, cancelled, no_show
+--   index: WHERE status = ANY (ARRAY['scheduled', 'checked_in', 'in_progress'])
+--   EXCLUDE USING gist (provider_user_id WITH =, during WITH &&)
+--     WHERE status <> ALL (ARRAY['cancelled','no_show']) AND archived_at IS NULL
+--
+-- Running the generated SQL would have DROPPED the type, which requires dropping the
+-- exclusion constraint that depends on it — opening a window in which concurrent
+-- double-booking is possible. That is the exact failure this schema exists to prevent.
+--
+-- The body is emptied and the journal entry kept, so drizzle's snapshot advances to the
+-- true state and future `generate` runs are clean.
+-- ---------------------------------------------------------------------------
+
+SELECT 1;

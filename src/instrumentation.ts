@@ -15,5 +15,19 @@ export async function register() {
   const { loadServerEnv } = await import('./env/server');
   loadServerEnv();
 
+  /*
+   * Pre-compute the decoy password hash.
+   *
+   * The login path verifies against it when an email does not exist, so that "no such
+   * account" costs the same wall-clock time as "wrong password". Computing it lazily
+   * would make the FIRST unknown-email attempt after a restart ~2x slower than the
+   * rest — a one-shot enumeration signal, but a free one to remove.
+   *
+   * Not awaited: it takes a few hundred milliseconds and nothing needs it until the
+   * first login, so it warms in the background rather than delaying readiness.
+   */
+  const { decoyHash } = await import('./server/auth/password');
+  void decoyHash();
+
   console.info('[startup] environment validated');
 }

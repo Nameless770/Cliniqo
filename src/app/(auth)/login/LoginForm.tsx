@@ -53,12 +53,7 @@ export function LoginForm() {
       </Field>
 
       <Field id="login-password" label="Password" required>
-        <Input
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-        />
+        <Input name="password" type="password" autoComplete="current-password" required />
       </Field>
 
       <Button type="submit" variant="primary" size="lg" fullWidth loading={pending}>

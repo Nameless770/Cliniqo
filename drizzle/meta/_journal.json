@@ -29,6 +29,76 @@
       "when": 1788573253982,
       "tag": "0003_seed_roles_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788584775057,
+      "tag": "0004_patient_list_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788584777472,
+      "tag": "0005_patient_clinical_write_permission",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788585750581,
+      "tag": "0006_appointment_status_and_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788585794992,
+      "tag": "0007_chunky_terrax",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788587262302,
+      "tag": "0008_visit_note_version_tenancy",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788613802479,
+      "tag": "0009_prescription_corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788613812671,
+      "tag": "0010_prescription_grants_and_formulary",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788615318767,
+      "tag": "0011_staff_setup_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788615488592,
+      "tag": "0012_audit_entity_type_audit_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788617583535,
+      "tag": "0013_patient_rights_permissions",
+      "breakpoints": true
     }
   ]
 }

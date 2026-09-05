@@ -164,6 +164,18 @@ export const patient = pgTable(
     index('patient_clinic_live_idx')
       .on(t.clinicId)
       .where(sql`${t.archivedAt} is null`),
+
+    /**
+     * The paginated patient list, ordered by name.
+     *
+     * `id` is in the index as a tiebreaker, not decoration: without a total order,
+     * OFFSET pagination can show the same patient on two pages and skip another
+     * entirely when two people share a name. On a patient roster that is a safety
+     * problem, not a cosmetic one.
+     */
+    index('patient_clinic_name_idx')
+      .on(t.clinicId, t.legalLastName, t.legalFirstName, t.id)
+      .where(sql`${t.archivedAt} is null`),
   ],
 );
 

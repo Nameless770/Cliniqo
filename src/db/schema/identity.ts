@@ -239,6 +239,50 @@ export const session = pgTable(
 );
 
 /**
+ * Single-use setup tokens for new staff accounts.
+ *
+ * An administrator creates an account with NO usable password. This table holds a
+ * short-lived, single-use token that lets the new staff member set their own password —
+ * so the administrator never learns it, and no password is ever transmitted by the system.
+ *
+ * Same discipline as `session`: the raw token is never stored. A database read — a leaked
+ * backup, a compromised replica — yields no usable setup link.
+ */
+export const staffSetupToken = pgTable(
+  'staff_setup_token',
+  {
+    id: primaryId(),
+    clinicId: uuid('clinic_id')
+      .notNull()
+      .references(() => clinic.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id),
+
+    /** SHA-256 of the token. 256 bits of CSPRNG output needs no slow KDF. */
+    tokenHash: text('token_hash').notNull(),
+
+    createdBy: uuid('created_by').references(() => userAccount.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Short — days, not weeks. An unused invitation is an unclaimed credential. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    usedIp: inet('used_ip'),
+
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: uuid('revoked_by').references(() => userAccount.id),
+  },
+  (t) => [
+    uniqueIndex('staff_setup_token_hash_idx').on(t.tokenHash),
+    /** At most one live invitation per account. Re-inviting revokes the previous one. */
+    uniqueIndex('staff_setup_token_live_idx')
+      .on(t.userId)
+      .where(sql`${t.usedAt} is null and ${t.revokedAt} is null`),
+  ],
+);
+
+/**
  * Login attempts, for rate limiting and lockout.
  *
  * This is operational security telemetry, not an audit record: it holds no PHI, and it

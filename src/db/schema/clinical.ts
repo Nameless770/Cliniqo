@@ -94,6 +94,16 @@ export const visitNoteVersion = pgTable(
   'visit_note_version',
   {
     id: primaryId(),
+    /**
+     * Denormalized from the parent note.
+     *
+     * Security-motivated, matching every other child table: a tenancy check stays a
+     * single-table predicate rather than a join. The simpler the check, the harder it is
+     * to write one that is subtly wrong, and cross-tenant leaks come from exactly those.
+     */
+    clinicId: uuid('clinic_id')
+      .notNull()
+      .references(() => clinic.id),
     visitNoteId: uuid('visit_note_id')
       .notNull()
       .references((): AnyPgColumn => visitNote.id),

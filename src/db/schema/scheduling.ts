@@ -158,7 +158,7 @@ export const appointment = pgTable(
       sql`upper("during")`,
     ),
 
-    status: appointmentStatus('status').notNull().default('booked'),
+    status: appointmentStatus('status').notNull().default('scheduled'),
 
     /**
      * Front-desk visible. Logistics only ("needs wheelchair access").
@@ -194,7 +194,7 @@ export const appointment = pgTable(
     /** Today's arrivals board. */
     index('appointment_clinic_active_idx')
       .on(t.clinicId, t.startsAt)
-      .where(sql`${t.status} in ('booked', 'checked_in', 'in_progress')`),
+      .where(sql`${t.status} in ('scheduled', 'checked_in', 'in_progress')`),
     index('appointment_provider_time_idx').on(t.providerUserId, t.startsAt),
 
     check('appointment_range_order', sql`upper("during") > lower("during")`),

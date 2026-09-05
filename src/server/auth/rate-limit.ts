@@ -26,7 +26,8 @@ import { getEnv } from '@/env/server';
  * container.
  */
 
-export type RateLimitVerdict = { allowed: true } | { allowed: false; retryAfterMinutes: number };
+export type RateLimitVerdict =
+  { allowed: true } | { allowed: false; retryAfterMinutes: number };
 
 /** Per-IP budget as a multiple of the per-account one. */
 const IP_BUDGET_MULTIPLIER = 4;

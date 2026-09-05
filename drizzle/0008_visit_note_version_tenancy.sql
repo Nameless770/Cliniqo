@@ -1,0 +1,2 @@
+ALTER TABLE "visit_note_version" ADD COLUMN "clinic_id" uuid NOT NULL;--> statement-breakpoint
+ALTER TABLE "visit_note_version" ADD CONSTRAINT "visit_note_version_clinic_id_clinic_id_fk" FOREIGN KEY ("clinic_id") REFERENCES "public"."clinic"("id") ON DELETE no action ON UPDATE no action;

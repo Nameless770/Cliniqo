@@ -9,7 +9,12 @@ import { getDb } from '@/db/client';
 import { role, userAccount, userRole } from '@/db/schema';
 import { getEnv } from '@/env/server';
 import { writeAuditEvent } from '@/server/audit/log';
-import { decoyHash, hashPassword, needsRehash, verifyPassword } from '@/server/auth/password';
+import {
+  decoyHash,
+  hashPassword,
+  needsRehash,
+  verifyPassword,
+} from '@/server/auth/password';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import {
   createSession,

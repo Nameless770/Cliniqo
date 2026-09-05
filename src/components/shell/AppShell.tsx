@@ -58,6 +58,13 @@ export type AppShellProps = {
   userName: string;
   /** Every role the account currently holds — an account can hold more than one. */
   roles: readonly RoleCode[];
+  /**
+   * Permissions resolved by the server for this request.
+   *
+   * An array, not a Set: this crosses into a Client Component and Sets do not survive
+   * serialisation. Capability names only — no PHI.
+   */
+  permissions: readonly string[];
   clinicName: string;
   children: React.ReactNode;
 };
@@ -69,7 +76,13 @@ export type AppShellProps = {
  * through it as a slot, so the page inside stays server-rendered — which is what keeps
  * patient data off the client boundary.
  */
-export function AppShell({ userName, roles, clinicName, children }: AppShellProps) {
+export function AppShell({
+  userName,
+  roles,
+  permissions,
+  clinicName,
+  children,
+}: AppShellProps) {
   const roleLabel = roles.map((role) => ROLE_LABELS[role]).join(' · ');
 
   return (
@@ -114,7 +127,7 @@ export function AppShell({ userName, roles, clinicName, children }: AppShellProp
         </header>
 
         <div className={styles.body}>
-          <Nav roles={roles} />
+          <Nav permissions={permissions} />
 
           {/* tabIndex -1 so the skip link can move focus here, not just scroll. */}
           <main id="main" className={styles.main} tabIndex={-1}>

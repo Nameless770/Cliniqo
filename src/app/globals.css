@@ -112,3 +112,49 @@ textarea {
     outline: 2px solid CanvasText;
   }
 }
+
+/*
+ * Print.
+ *
+ * The record export (§164.524) is produced by printing to PDF, so the printed page must
+ * be the document and nothing else — no navigation, no buttons, no dark-mode inversion
+ * that wastes a patient's toner and reads badly on paper.
+ */
+@media print {
+  .no-print,
+  header[class],
+  nav,
+  button,
+  form {
+    display: none !important;
+  }
+
+  :root {
+    --bg-page: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-sunken: #ffffff;
+    --text-primary: #000000;
+    --text-secondary: #333333;
+    --text-muted: #555555;
+    --border-subtle: #cccccc;
+    --border-default: #999999;
+  }
+
+  body {
+    background: #ffffff;
+    color: #000000;
+    font-size: 11pt;
+  }
+
+  a {
+    color: #000000;
+    text-decoration: none;
+  }
+
+  /* A clinical document should not split a note across a page break mid-sentence. */
+  section,
+  article,
+  li {
+    break-inside: avoid;
+  }
+}

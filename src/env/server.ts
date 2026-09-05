@@ -86,6 +86,21 @@ const schema = z
     AUTH_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
     AUTH_LOCKOUT_MINUTES: z.coerce.number().int().min(1).default(15),
 
+    /* --- PHI read throttle ------------------------------------------------- */
+    /**
+     * Ceiling on PHI reads per actor per window.
+     *
+     * Not a performance limit — an exfiltration limit. Every read is already audited, so
+     * a scrape is reconstructable afterwards; this is what stops it while it happens.
+     *
+     * Sized well above real clinical use. A busy clinician opens tens of charts in a day;
+     * a scraper does thousands in a minute. The gap between those is where this sits.
+     */
+    PHI_READ_LIMIT: z.coerce.number().int().min(10).max(100_000).default(120),
+    PHI_READ_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(10),
+    /** Reads per hour above which an actor is surfaced for review. Below the hard limit. */
+    PHI_READ_ALERT_PER_HOUR: z.coerce.number().int().min(10).default(200),
+
     /* --- Escape hatch ----------------------------------------------------- */
     /**
      * Seed data is synthetic (§164.514 — no production PHI in development or test).

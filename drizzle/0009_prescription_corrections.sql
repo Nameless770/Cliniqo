@@ -1,0 +1,3 @@
+ALTER TABLE "prescription" ADD COLUMN "supersedes_prescription_id" uuid;--> statement-breakpoint
+ALTER TABLE "prescription" ADD CONSTRAINT "prescription_supersedes_prescription_id_prescription_id_fk" FOREIGN KEY ("supersedes_prescription_id") REFERENCES "public"."prescription"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "prescription_supersedes_idx" ON "prescription" USING btree ("supersedes_prescription_id") WHERE "prescription"."supersedes_prescription_id" is not null;

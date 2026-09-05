@@ -20,30 +20,15 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
 
-  /**
-   * Clickjacking defence that actually applies to modern browsers, alongside the legacy
-   * X-Frame-Options above.
+  /*
+   * Content-Security-Policy is NOT set here.
+   *
+   * It is emitted per-request from src/middleware.ts, because the nonce that replaced
+   * 'unsafe-inline' (security review F2) has to be generated per request. Setting a
+   * second, static CSP here would not be additive — a browser enforces every CSP header
+   * it receives, so the weaker static policy would have to be satisfied too, and it
+   * still contained 'unsafe-inline'. One policy, one place.
    */
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      // TODO(phase-2): replace 'unsafe-inline' with a per-request nonce issued from
-      // middleware. Next's inline bootstrap script needs one or the other, and shipping
-      // a nonce-based policy is a prerequisite for calling this hardened.
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data:",
-      "font-src 'self'",
-      // No third-party origins. Any future connection here is a PHI egress path and
-      // needs a BAA before it is added.
-      "connect-src 'self'",
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-    ].join('; '),
-  },
 
   /** Nothing in a clinic app needs these. */
   {

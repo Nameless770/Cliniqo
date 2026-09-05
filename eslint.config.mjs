@@ -101,16 +101,82 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ['@/db', '@/db/*', '@/server/*', '@/env/server'],
+              /*
+               * Server INTERNALS are blocked. `@/server/actions/*` is deliberately
+               * exempt: a 'use server' function is the designed boundary crossing —
+               * importing one ships a callable reference, never the implementation or
+               * anything it closes over. Blocking actions here would push every form
+               * into app/ for no security gain, while banning the database, services,
+               * and secrets — the things that actually leak — stays enforced.
+               */
+              group: [
+                '@/db',
+                '@/db/*',
+                '@/env/server',
+                '@/server/*',
+                '!@/server/actions',
+                '!@/server/actions/*',
+              ],
               message:
                 'Server-only module. Components and lib/ may be bundled for the browser; ' +
                 'importing the database, a service, or server env here risks shipping ' +
                 'credentials or patient data to the client. Fetch on the server and pass ' +
-                'down only the fields the component renders.',
+                'down only the fields the component renders. Server actions ' +
+                '(@/server/actions/*) are allowed — they are the intended boundary.',
             },
             {
               group: ['drizzle-orm', 'drizzle-orm/*', 'pg'],
               message: 'Database libraries belong in src/db and src/server only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* BOUNDARY: patient tables are reachable only from the data-access layer  */
+  /* ---------------------------------------------------------------------- */
+  {
+    files: ['src/server/**/*.ts', 'src/app/**/*.{ts,tsx}'],
+    ignores: ['src/server/data-access/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@/db/schema',
+              /**
+               * This is the mechanical half of "reading PHI without logging it should be
+               * something the codebase has no path for".
+               *
+               * The audited data-access layer authorizes, reads, and writes the audit row
+               * in one transaction. If a service could import `patient` directly it could
+               * also query it directly, and the audit trail would depend on every future
+               * developer remembering — which is the assumption this architecture exists
+               * to remove.
+               *
+               * Non-PHI tables (clinic, user_account, session, role, audit_event) are not
+               * listed: identity and audit infrastructure legitimately query them.
+               */
+              importNames: [
+                'patient',
+                'patientAllergy',
+                'patientFlag',
+                'appointment',
+                'appointmentType',
+                'visitNote',
+                'visitNoteVersion',
+                'prescription',
+                'prescriptionItem',
+                'breakGlassGrant',
+              ],
+              message:
+                'Patient tables may only be queried from src/server/data-access/. Use ' +
+                'auditedRead / auditedWrite / auditedSearch — they authorize, read, and ' +
+                'write the audit row in one transaction. Direct access would leave the ' +
+                'audit trail depending on someone remembering.',
             },
           ],
         },

@@ -23,6 +23,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     <AppShell
       userName={active.fullName}
       roles={active.roles}
+      permissions={[...active.permissions]}
       clinicName={active.clinicName}
     >
       {children}

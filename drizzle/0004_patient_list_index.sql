@@ -1,0 +1,1 @@
+CREATE INDEX "patient_clinic_name_idx" ON "patient" USING btree ("clinic_id","legal_last_name","legal_first_name","id") WHERE "patient"."archived_at" is null;

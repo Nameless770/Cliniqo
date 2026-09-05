@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-import { navItemsForRoles, type RoleCode } from '@/lib/roles';
+import { navItemsFor } from '@/lib/roles';
 
 import styles from './AppShell.module.css';
 
@@ -19,9 +19,9 @@ import styles from './AppShell.module.css';
  * server action is still a public endpoint. Authorization is re-checked server-side on
  * every data operation — CLAUDE.md rule 2.
  */
-export function Nav({ roles }: { roles: readonly RoleCode[] }) {
+export function Nav({ permissions }: { permissions: readonly string[] }) {
   const pathname = usePathname();
-  const items = navItemsForRoles(roles);
+  const items = navItemsFor(permissions);
 
   return (
     <nav className={styles.nav} aria-label="Main">
