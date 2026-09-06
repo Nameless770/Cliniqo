@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { guardPage } from '@/server/auth/authorize';
-import { getFormulary } from '@/server/data-access/prescriptions';
+import { getFormulary, getPatientPrescriptions } from '@/server/data-access/prescriptions';
 import { getPatient } from '@/server/data-access/patients';
 
 import { PrescribeForm } from './PrescribeForm';
@@ -27,11 +27,43 @@ export default async function PrescribePage({
   const { id } = await params;
   const sp = await searchParams;
   const visitNoteId = typeof sp['note'] === 'string' ? sp['note'] : undefined;
+  const correctId = typeof sp['correct'] === 'string' ? sp['correct'] : undefined;
 
   const [view, formulary] = await Promise.all([getPatient(id), getFormulary()]);
   if (!view) notFound();
 
   const p = view.patient;
+
+  /*
+   * Correction. When `?correct=<id>` is present, pre-fill the form from the prescription
+   * being replaced so the clinician edits rather than retypes. The original is fetched
+   * through the same audited read as the chart — reading it to correct it is a legitimate
+   * `prescription.read`. A stale or foreign id simply yields no defaults; the server
+   * action re-verifies the supersede target anyway.
+   */
+  let correcting: { originalId: string; defaults: Record<string, string | number> } | undefined;
+  if (correctId) {
+    const existing = await getPatientPrescriptions(id);
+    const original = existing.find((rx) => rx.id === correctId);
+    const line = original?.lines[0];
+    if (original && line) {
+      correcting = {
+        originalId: original.id,
+        defaults: {
+          medicationId: line.medicationId,
+          dose: line.dose ?? '',
+          route: line.route ?? 'oral',
+          frequency: line.frequency ?? '',
+          durationDays: line.durationDays ?? 7,
+          quantity: line.quantity ?? '',
+          quantityUnit: line.quantityUnit ?? '',
+          refills: line.refills,
+          instructions: line.instructions ?? '',
+          indication: line.indication ?? '',
+        },
+      };
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -83,6 +115,7 @@ export default async function PrescribePage({
       <PrescribeForm
         patientId={id}
         {...(visitNoteId ? { visitNoteId } : {})}
+        {...(correcting ? { correcting } : {})}
         formulary={formulary}
       />
     </div>

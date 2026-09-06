@@ -115,6 +115,7 @@ export type BookAppointmentInput = z.infer<typeof bookAppointmentInput>;
 export const rescheduleAppointmentInput = z
   .object({
     appointmentId: z.uuid(),
+    patientId: z.uuid(),
     startsAt: isoDateTime,
     durationMinutes: z.coerce.number().int().min(5).max(480),
   })
@@ -123,6 +124,7 @@ export const rescheduleAppointmentInput = z
 export const cancelAppointmentInput = z
   .object({
     appointmentId: z.uuid(),
+    patientId: z.uuid(),
     /** Required: a cancellation without a reason is an unanswerable question later. */
     reason: z
       .string()
@@ -135,6 +137,8 @@ export const cancelAppointmentInput = z
 export const changeStatusInput = z
   .object({
     appointmentId: z.uuid(),
+    // Verified against the appointment in-query; also the audit subject.
+    patientId: z.uuid(),
     status: z.enum(APPOINTMENT_STATUSES),
   })
   .strict();

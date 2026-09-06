@@ -9,6 +9,7 @@ import {
 import {
   formatDateInZone,
   formatTimeInZone,
+  formatWallClockInZone,
   shiftDate,
   todayInZone,
   zonedDayRange,
@@ -93,6 +94,8 @@ export default async function SchedulePage({
 
   const mayCheckIn = can(session.permissions, 'appointment.checkin');
   const mayChangeStatus = can(session.permissions, 'appointment.status');
+  const mayCancel = can(session.permissions, 'appointment.cancel');
+  const mayReschedule = can(session.permissions, 'appointment.update');
 
   const href = (over: Record<string, string | undefined>) => {
     const sp = new URLSearchParams();
@@ -250,9 +253,16 @@ export default async function SchedulePage({
 
                   <StatusActions
                     appointmentId={entry.id}
+                    patientId={entry.patientId}
                     status={entry.status}
+                    startsAtLocal={formatWallClockInZone(entry.startsAt, timeZone)}
+                    durationMinutes={Math.round(
+                      (entry.endsAt.getTime() - entry.startsAt.getTime()) / 60_000,
+                    )}
                     canCheckIn={mayCheckIn}
                     canChangeStatus={mayChangeStatus}
+                    canCancel={mayCancel}
+                    canReschedule={mayReschedule}
                   />
                 </li>
               ))}

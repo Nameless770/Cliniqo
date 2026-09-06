@@ -379,6 +379,7 @@ export async function bookAppointment(
  */
 export async function rescheduleAppointment(
   appointmentId: string,
+  patientId: string,
   /** Wall-clock 'YYYY-MM-DDTHH:mm' in CLINIC time, not an instant. See below. */
   startsAt: string,
   durationMinutes: number,
@@ -390,6 +391,8 @@ export async function rescheduleAppointment(
         action: 'appointment.update',
         entityType: 'appointment',
         entityId: appointmentId,
+        // Attributable to one patient; passed in and verified in-query below.
+        subjectPatientId: patientId,
         metadata: { operation: 'reschedule', durationMinutes },
       },
       async (tx, session): Promise<BookingResult> => {
@@ -411,6 +414,7 @@ export async function rescheduleAppointment(
           .where(
             and(
               eq(appointment.id, appointmentId),
+              eq(appointment.patientId, patientId),
               eq(appointment.clinicId, session.clinicId),
               isNull(appointment.archivedAt),
             ),
@@ -468,6 +472,7 @@ export type StatusResult =
  */
 export async function changeAppointmentStatus(
   appointmentId: string,
+  patientId: string,
   next: AppointmentStatus,
 ): Promise<StatusResult> {
   return auditedWrite(
@@ -476,6 +481,11 @@ export async function changeAppointmentStatus(
       action: next === 'checked_in' ? 'appointment.checkin' : 'appointment.update',
       entityType: 'appointment',
       entityId: appointmentId,
+      // The subject the audit log needs. Passed by the caller and VERIFIED in the query
+      // below (the notes pattern) — a mismatched pair finds no row. A single-appointment
+      // write is attributable to exactly one patient, so this must be present, and the
+      // appointment table is only read inside this transaction, so it has to come in.
+      subjectPatientId: patientId,
       metadata: { toStatus: next },
     },
     async (tx, session): Promise<StatusResult> => {
@@ -489,6 +499,7 @@ export async function changeAppointmentStatus(
         .where(
           and(
             eq(appointment.id, appointmentId),
+            eq(appointment.patientId, patientId),
             eq(appointment.clinicId, session.clinicId),
             isNull(appointment.archivedAt),
           ),
@@ -542,6 +553,7 @@ export async function changeAppointmentStatus(
  */
 export async function cancelAppointment(
   appointmentId: string,
+  patientId: string,
   reason: string,
 ): Promise<StatusResult> {
   return auditedWrite(
@@ -550,6 +562,7 @@ export async function cancelAppointment(
       action: 'appointment.cancel',
       entityType: 'appointment',
       entityId: appointmentId,
+      subjectPatientId: patientId,
       purpose: reason,
     },
     async (tx, session): Promise<StatusResult> => {
@@ -559,6 +572,7 @@ export async function cancelAppointment(
         .where(
           and(
             eq(appointment.id, appointmentId),
+            eq(appointment.patientId, patientId),
             eq(appointment.clinicId, session.clinicId),
             isNull(appointment.archivedAt),
           ),

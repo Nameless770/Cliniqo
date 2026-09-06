@@ -16,6 +16,8 @@ import { getPatientPrescriptions } from '@/server/data-access/prescriptions';
 
 import { BreakGlassButton } from './BreakGlassButton';
 import { ClinicalFacts } from './ClinicalFacts';
+import { ArchiveControls } from './ArchiveControls';
+import { PrescriptionActions } from './PrescriptionActions';
 import { StartNoteButton } from './StartNoteButton';
 
 /**
@@ -119,6 +121,7 @@ export default async function PatientProfilePage({
   const mayExport = can(session.permissions, 'patient.export');
   const mayAudit = can(session.permissions, 'audit.read');
   const mayBreakGlass = can(session.permissions, 'breakglass.use');
+  const mayArchive = can(session.permissions, 'patient.archive');
   const timeZone = session.clinicTimeZone;
 
   return (
@@ -246,6 +249,10 @@ export default async function PatientProfilePage({
         >
           This record is archived. {p.archiveReason ?? ''}
         </p>
+      ) : null}
+
+      {mayArchive && p.archivedAt ? (
+        <ArchiveControls patientId={id} archived={true} />
       ) : null}
 
       {/*
@@ -510,6 +517,17 @@ export default async function PatientProfilePage({
                       Replaces an earlier prescription in this list.
                     </p>
                   ) : null}
+
+                  {/*
+                    Cancel / correct, only for a LIVE prescription a prescriber can act on.
+                    A cancelled one is already history; a draft has no separate flow here;
+                    an archived patient takes no new clinical writes.
+                  */}
+                  {mayPrescribe &&
+                  !p.archivedAt &&
+                  (rx.status === 'signed' || rx.status === 'printed') ? (
+                    <PrescriptionActions patientId={id} prescriptionId={rx.id} />
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -610,6 +628,33 @@ export default async function PatientProfilePage({
           />
         </dl>
       </Section>
+
+      {/*
+        Administrative footer. Archival is destructive-ish and rare, so it sits at the
+        bottom away from the everyday actions — a record is taken out of circulation, not
+        deleted (CLAUDE.md rule 4). Only shown to holders of `patient.archive`, and only
+        when the record is still active.
+      */}
+      {mayArchive && !p.archivedAt ? (
+        <section
+          style={{
+            marginTop: 'var(--space-4)',
+            paddingTop: 'var(--space-4)',
+            borderTop: '1px solid var(--border-subtle)',
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-secondary)',
+              margin: '0 0 var(--space-2)',
+            }}
+          >
+            Administration
+          </h2>
+          <ArchiveControls patientId={id} archived={false} />
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -77,11 +77,15 @@ export type AuditedSpec = {
  *
  * Thrown, not warned. A silent gap in the audit trail is worse than a failed request.
  */
-function assertSubjectPresent(spec: AuditedSpec): void {
+function assertSubjectPresent(spec: AuditedSpec, subjectDeferred: boolean): void {
   if (
     PHI_ACTIONS.has(spec.action) &&
     !COLLECTION_ACTIONS.has(spec.action) &&
-    !spec.subjectPatientId
+    !spec.subjectPatientId &&
+    // A creation names a subject that does not exist until the row is inserted, so it
+    // supplies `subjectFrom` to resolve the new id after the work runs. That is not a
+    // missing subject — it is a subject known one step later.
+    !subjectDeferred
   ) {
     throw new Error(
       `Audit misuse: "${spec.action}" touches PHI but no subjectPatientId was supplied. ` +
@@ -167,8 +171,16 @@ async function auditedOperation<T>(
    * object on the way in, so a mutation would silently never reach the audit row.
    */
   metadataFrom?: (result: T) => Record<string, unknown>,
+  /**
+   * Resolve the audit subject FROM the work's result — for a creation, where the patient
+   * id does not exist until the insert returns it. When present, the up-front subject
+   * check is deferred and this supplies both the subject and (absent an explicit one) the
+   * entity id on the audit row, so a `patient.create` event still names the patient it
+   * created.
+   */
+  subjectFrom?: (result: T) => string,
 ): Promise<T> {
-  assertSubjectPresent(spec);
+  assertSubjectPresent(spec, Boolean(subjectFrom));
 
   const context: AuthzContext = {
     subjectPatientId: spec.subjectPatientId ?? null,
@@ -230,13 +242,19 @@ async function auditedOperation<T>(
         ...(metadataFrom ? metadataFrom(result) : {}),
       };
 
+      const resolvedSubject = subjectFrom
+        ? subjectFrom(result)
+        : (spec.subjectPatientId ?? null);
+
       await writeAuditEvent(tx, {
         ...actor,
         action: spec.action,
         outcome: 'allowed',
-        subjectPatientId: spec.subjectPatientId ?? null,
+        subjectPatientId: resolvedSubject,
         entityType: spec.entityType,
-        entityId: spec.entityId ?? null,
+        // A creation has no entity id up front either; fall back to the resolved subject
+        // so the row points at what was made.
+        entityId: spec.entityId ?? resolvedSubject,
         purpose: spec.purpose ?? null,
         metadata: Object.keys(metadata).length > 0 ? metadata : null,
       });
@@ -293,8 +311,10 @@ export function auditedRead<T>(
 export function auditedWrite<T>(
   spec: AuditedSpec,
   work: (tx: Tx, session: ActiveSession) => Promise<T>,
+  /** For a creation, resolve the audit subject from the inserted row's id. */
+  subjectFrom?: (result: T) => string,
 ): Promise<T> {
-  return auditedOperation(spec, work);
+  return auditedOperation(spec, work, undefined, subjectFrom);
 }
 
 /**

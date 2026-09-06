@@ -36,7 +36,13 @@ export default defineConfig({
   // Same '@' alias as tsconfig, so a test can import the application's own predicates
   // instead of restating them and drifting from what actually ships.
   resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // See tests/helpers/empty.ts. The integration tests import the real audited layer,
+      // whose modules open with `import 'server-only'`; that guard needs the react-server
+      // condition the runner does not set, so it is shimmed to a no-op for tests only.
+      'server-only': fileURLToPath(new URL('./tests/helpers/empty.ts', import.meta.url)),
+    },
   },
   test: {
     environment: 'node',

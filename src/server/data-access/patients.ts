@@ -418,6 +418,10 @@ export async function createPatient(
 
       return { id: row!.id, mrn: row!.mrn };
     },
+    // The subject is the patient just created — resolved from the insert, since it does
+    // not exist until then. Without this the audit row would name no one, and registering
+    // a patient would fail the up-front subject assertion outright.
+    (result) => result.id,
   );
 }
 

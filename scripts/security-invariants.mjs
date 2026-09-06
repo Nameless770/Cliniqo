@@ -185,6 +185,77 @@ check(
   !/action: `authz\.denied/.test(authorize),
 );
 
+/* --------------------------------- 2b. every PHI write names its subject */
+
+/*
+ * The audited layer throws at runtime when a PHI, non-collection action is logged with no
+ * `subjectPatientId` — but a throw only fires when the code path RUNS. Three appointment
+ * mutations (status, check-in, reschedule) shipped with this bug and never tripped it,
+ * because their buttons 500'd on the first click and nobody had wired a test. Cancel and
+ * reschedule inherited it the moment their UI went in.
+ *
+ * This is that runtime assertion, moved to build time: scan every audited spec in the
+ * data-access layer and, when its action must name a patient, require `subjectPatientId`
+ * in the same spec. It reads the spec object between the `audited*(` open and the async
+ * callback that follows — the actual code, not a comment.
+ */
+{
+  const requiresSubject = new Set(
+    [...PHI_ACTIONS].filter((a) => !COLLECTION_ACTIONS.has(a)),
+  );
+
+  const daDir = 'src/server/data-access';
+  const offenders = [];
+
+  // Extract the full balanced parenthesised call starting at `open` (index of the "(").
+  const balancedCall = (src, open) => {
+    let depth = 0;
+    for (let i = open; i < src.length; i++) {
+      const c = src[i];
+      if (c === '(') depth++;
+      else if (c === ')') {
+        depth--;
+        if (depth === 0) return src.slice(open, i + 1);
+      }
+    }
+    return src.slice(open);
+  };
+
+  for (const file of readdirSync(daDir).filter((f) => f.endsWith('.ts'))) {
+    const src = stripComments(read(`${daDir}/${file}`));
+    const callRe = /audited(?:Write|Read|Operation|Search)\s*\(/g;
+    let m;
+    while ((m = callRe.exec(src)) !== null) {
+      const openParen = src.indexOf('(', m.index);
+      const call = balancedCall(src, openParen);
+
+      // The spec object is everything up to the async work callback.
+      const cut = call.search(/async\s*\(\s*tx\b/);
+      const spec = cut === -1 ? call.slice(0, 600) : call.slice(0, cut);
+
+      const actionMatch = spec.match(/action:\s*'([^']+)'/);
+      if (!actionMatch) continue; // auditedSearch may default its action; not our concern
+      const action = actionMatch[1];
+      if (!requiresSubject.has(action)) continue;
+
+      // Satisfied by an explicit subject in the spec, OR a subject RESOLVER passed after
+      // the work callback — `(result) => result.id` for a creation, which names the row it
+      // just inserted. This mirrors the runtime `subjectDeferred` branch exactly.
+      const hasSubject = spec.includes('subjectPatientId');
+      const afterWork = cut === -1 ? '' : call.slice(cut);
+      const hasResolver = /=>\s*\w+\.id\b/.test(afterWork);
+
+      if (!hasSubject && !hasResolver) offenders.push(`${file}:${action}`);
+    }
+  }
+
+  check(
+    'Audit',
+    `every single-patient PHI write names its subject${offenders.length ? ` (missing: ${offenders.join(', ')})` : ''}`,
+    offenders.length === 0,
+  );
+}
+
 /* ------------------------------------------------------ 3. F1 read budget */
 
 check(
@@ -660,21 +731,19 @@ void randomUUID;
     return acc;
   };
 
-  /* Each of these is a missing screen, named so the gap is legible:
-       rescheduleAppointmentAction - no reschedule UI
-       cancelAppointmentAction     - StatusActions defers it: "cancellation needs a
-                                     reason; separate flow". That flow does not exist.
-       archivePatientAction        - the patient list can FILTER by archived, but nothing
-       unarchivePatientAction        can archive or restore a record
-       cancelPrescriptionAction    - corrections work (cancel + supersede); plain
-                                     withdrawal without a replacement has no button */
-  const KNOWN_UNWIRED = new Set([
-    'rescheduleAppointmentAction',
-    'cancelAppointmentAction',
-    'archivePatientAction',
-    'unarchivePatientAction',
-    'cancelPrescriptionAction',
-  ]);
+  /*
+   * Empty, and it should stay that way. Every one of these was wired up:
+   *   - reschedule / cancel appointment -> StatusActions reveals on the schedule
+   *   - archive / restore patient       -> ArchiveControls on the chart
+   *   - cancel prescription             -> PrescriptionActions on the chart
+   *
+   * KNOWN NOTE ON THIS CHECK'S REACH. It confirms the SYMBOL appears in the UI, not that
+   * the branch using it is live. `correctPrescriptionAction` passed here for weeks while
+   * dead: PrescribeForm imported it behind `correcting ? correct : create`, and no page
+   * ever set `correcting`. That is now wired (the prescribe page reads ?correct=), but
+   * the blind spot is real — a symbol in an unreachable branch still counts as reached.
+   */
+  const KNOWN_UNWIRED = new Set([]);
 
   const uiText = [...walkSrc('src/app'), ...walkSrc('src/components')]
     .map((f) => readFileSync(f, 'utf8'))

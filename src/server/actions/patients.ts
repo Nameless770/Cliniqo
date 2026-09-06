@@ -35,6 +35,8 @@ import {
 export type PatientFormState = {
   errors?: FieldErrors;
   message?: string;
+  /** Set on a successful mutation, so the UI can style the message as success. */
+  ok?: boolean;
   /** Populated when registration collides with an existing record. */
   duplicates?: PatientListRow[];
 };
@@ -196,7 +198,7 @@ export async function archivePatientAction(
 
     revalidatePath('/patients');
     revalidatePath(`/patients/${parsed.data.patientId}`);
-    return { message: 'Patient archived.' };
+    return { ok: true, message: 'Patient archived.' };
   } catch (error) {
     const authz = authzMessage(error);
     if (authz) return authz;
@@ -230,7 +232,7 @@ export async function unarchivePatientAction(
 
     revalidatePath('/patients');
     revalidatePath(`/patients/${patientId}`);
-    return { message: 'Patient restored.' };
+    return { ok: true, message: 'Patient restored.' };
   } catch (error) {
     const authz = authzMessage(error);
     if (authz) return authz;

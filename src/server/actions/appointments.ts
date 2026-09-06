@@ -96,6 +96,7 @@ export async function rescheduleAppointmentAction(
        known further down, so the conversion happens there. */
     const result = await rescheduleAppointment(
       parsed.data.appointmentId,
+      parsed.data.patientId,
       parsed.data.startsAt,
       parsed.data.durationMinutes,
     );
@@ -133,6 +134,7 @@ export async function changeStatusAction(
   try {
     const result = await changeAppointmentStatus(
       parsed.data.appointmentId,
+      parsed.data.patientId,
       parsed.data.status,
     );
 
@@ -165,7 +167,11 @@ export async function cancelAppointmentAction(
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
-    const result = await cancelAppointment(parsed.data.appointmentId, parsed.data.reason);
+    const result = await cancelAppointment(
+      parsed.data.appointmentId,
+      parsed.data.patientId,
+      parsed.data.reason,
+    );
 
     if (!result.ok) {
       return {

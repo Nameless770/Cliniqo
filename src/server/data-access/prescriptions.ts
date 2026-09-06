@@ -62,6 +62,8 @@ import { auditedRead, auditedSearch, auditedWrite } from './audited';
  */
 
 export type PrescriptionLine = {
+  /** The formulary id, so a correction can pre-select the same drug. Not sensitive. */
+  medicationId: string;
   medicationName: string;
   medicationStrength: string | null;
   dose: string | null;
@@ -103,6 +105,7 @@ function isGuardViolation(error: unknown, fragment: string): boolean {
 async function loadLines(tx: Tx, prescriptionId: string): Promise<PrescriptionLine[]> {
   const rows = await tx
     .select({
+      medicationId: prescriptionItem.medicationId,
       medicationName: medication.name,
       medicationStrength: medication.strength,
       dose: prescriptionItem.dose,
