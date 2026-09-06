@@ -14,6 +14,8 @@ import {
   type AppointmentStatus,
   type BookAppointmentInput,
 } from '@/lib/appointment-schemas';
+import { zonedWallClock } from '@/lib/clinic-time';
+import { isSlotContention } from '@/lib/pg-errors';
 import type { Tx } from '@/server/audit/log';
 import { AuthorizationError } from '@/server/auth/authorize';
 
@@ -69,17 +71,21 @@ import { auditedRead, auditedSearch, auditedWrite } from './audited';
  * nothing on the reads.
  */
 
-/** PostgreSQL SQLSTATE for exclusion_violation. */
-const EXCLUSION_VIOLATION = '23P01';
-
-function isSlotConflict(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: string }).code === EXCLUSION_VIOLATION
-  );
-}
+/*
+ * Slot contention is not always exclusion_violation.
+ *
+ * This originally matched 23P01 alone, which is what two competing clients produce and
+ * what the comment above still describes. Under REAL contention it is wrong: with twenty
+ * simultaneous bookings, transactions queue on the GiST index in differing orders and
+ * PostgreSQL kills some as deadlock victims (40P01) instead. Exactly one appointment is
+ * still created — the constraint does its job — but the losers carried a code this
+ * function did not recognise, so they were rethrown and surfaced as a server error rather
+ * than "that slot just went". Found by tests/db/double-booking.test.ts.
+ *
+ * The predicate lives in @/lib/pg-errors so the test asserts against this exact function
+ * rather than a copy of the code list that can drift from it.
+ */
+const isSlotConflict = isSlotContention;
 
 /** A `tstzrange` literal, half-open: start inclusive, end exclusive. */
 function rangeLiteral(start: Date, end: Date): string {
@@ -88,7 +94,11 @@ function rangeLiteral(start: Date, end: Date): string {
 
 export type BookingResult =
   | { ok: true; appointmentId: string }
-  | { ok: false; reason: 'slot_taken' | 'closed' | 'patient_missing' };
+  /* `invalid_time` should be unreachable — the zod schema requires the same
+     'YYYY-MM-DDTHH:mm' shape the converter parses. It is a named result rather than a
+     throw because a malformed time is a bad request, not a server fault, and because a
+     silent NaN would otherwise become a tstzrange error deep in the insert. */
+  | { ok: false; reason: 'slot_taken' | 'closed' | 'patient_missing' | 'invalid_time' };
 
 export type ScheduleEntry = {
   id: string;
@@ -290,10 +300,6 @@ async function findBlockingException(
 export async function bookAppointment(
   input: BookAppointmentInput,
 ): Promise<BookingResult> {
-  const start = new Date(input.startsAt);
-  const end = new Date(start.getTime() + input.durationMinutes * 60_000);
-  const range = rangeLiteral(start, end);
-
   try {
     return await auditedWrite(
       {
@@ -307,6 +313,21 @@ export async function bookAppointment(
         },
       },
       async (tx, session): Promise<BookingResult> => {
+        /*
+         * The wall-clock string becomes an instant HERE, using the CLINIC's timezone.
+         *
+         * It used to be `new Date(input.startsAt)` before this callback, which parses an
+         * offset-less string in the SERVER's timezone — so a New York clinic booked on a
+         * UTC container landed five hours out, and on the developer's machine
+         * (Africa/Cairo) seven. The clinic timezone only exists on `session`, so the
+         * conversion has to happen inside the audited block; doing it here also makes the
+         * mistake unrepresentable, because there is no Date to pass in wrongly.
+         */
+        const start = zonedWallClock(input.startsAt, session.clinicTimeZone);
+        if (Number.isNaN(start.getTime())) return { ok: false, reason: 'invalid_time' };
+        const end = new Date(start.getTime() + input.durationMinutes * 60_000);
+        const range = rangeLiteral(start, end);
+
         if (
           await findBlockingException(tx, session.clinicId, input.providerUserId, range)
         ) {
@@ -358,12 +379,10 @@ export async function bookAppointment(
  */
 export async function rescheduleAppointment(
   appointmentId: string,
-  startsAt: Date,
+  /** Wall-clock 'YYYY-MM-DDTHH:mm' in CLINIC time, not an instant. See below. */
+  startsAt: string,
   durationMinutes: number,
 ): Promise<BookingResult> {
-  const end = new Date(startsAt.getTime() + durationMinutes * 60_000);
-  const range = rangeLiteral(startsAt, end);
-
   try {
     return await auditedWrite(
       {
@@ -374,6 +393,14 @@ export async function rescheduleAppointment(
         metadata: { operation: 'reschedule', durationMinutes },
       },
       async (tx, session): Promise<BookingResult> => {
+        /* Converted in the clinic's timezone, for the reason spelled out in
+           bookAppointment: an offset-less string parsed by the server means the server's
+           timezone silently decides when the patient is seen. */
+        const start = zonedWallClock(startsAt, session.clinicTimeZone);
+        if (Number.isNaN(start.getTime())) return { ok: false, reason: 'invalid_time' };
+        const end = new Date(start.getTime() + durationMinutes * 60_000);
+        const range = rangeLiteral(start, end);
+
         const [existing] = await tx
           .select({
             patientId: appointment.patientId,

@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto';
 
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 
-import { userAccount, visitNote, visitNoteVersion } from '@/db/schema';
+import { patient, userAccount, visitNote, visitNoteVersion } from '@/db/schema';
 import type { NoteContentInput } from '@/lib/note-schemas';
 import type { Tx } from '@/server/audit/log';
 
-import { auditedRead, auditedWrite } from './audited';
+import { auditedRead, auditedSearch, auditedWrite } from './audited';
 
 /**
  * Visit note data access.
@@ -613,5 +613,108 @@ export async function addAddendum(
 
       return { ok: true, noteId };
     },
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cross-patient work queue                                                   */
+/* -------------------------------------------------------------------------- */
+
+export type UnsignedNoteRow = {
+  id: string;
+  patientId: string;
+  patientName: string;
+  mrn: string;
+  authorName: string;
+  authoredByMe: boolean;
+  startedAt: Date;
+  lastTouchedAt: Date;
+};
+
+export type UnsignedNoteQueue = {
+  rows: UnsignedNoteRow[];
+  /** Which slice the server decided to return — see the scoping note below. */
+  scope: 'mine' | 'clinic';
+};
+
+/**
+ * Unsigned drafts, across patients. Backed by `visit_note_author_draft_idx`.
+ *
+ * WHY THIS PAGE EXISTS
+ * --------------------
+ * A draft is not in the record. It is invisible to the next clinician, absent from an
+ * export, and unbillable. Every other view is patient-first, so a note left unsigned is
+ * only found by opening the chart it belongs to — which nobody does for a patient they
+ * have stopped thinking about. The dashboard counts these; this answers "which ones".
+ *
+ * SCOPE IS DECIDED HERE, NOT BY THE CALLER
+ * ----------------------------------------
+ * A doctor sees only their own drafts. CLAUDE.md scopes doctors to their own patients,
+ * and a clinic-wide list would disclose to Dr A that patient X was seen by Dr B — a
+ * disclosure with no bearing on Dr A's work, so minimum necessary (164.502(b)) rules it
+ * out. Nobody else can sign their note anyway, so a wider list would not even be useful.
+ *
+ * An administrator holding `audit.read` sees the clinic. That is the oversight role, it
+ * is not patient-scoped, and chasing unsigned notes is the job. The read is audited like
+ * any other, with the scope recorded, so "an office manager listed every open chart"
+ * remains a visible, reviewable event rather than an invisible one.
+ *
+ * Content is never selected — no chief complaint, no assessment. This is a worklist of
+ * WHICH notes are open, not a way to read them without opening each one, which would
+ * turn one broad query into an untraceable bulk disclosure.
+ */
+export async function listUnsignedNotes(): Promise<UnsignedNoteQueue> {
+  return auditedSearch(
+    {
+      permission: 'note.read',
+      action: 'note.search',
+      entityType: 'visit_note',
+      // No subjectPatientId: this spans patients. Registered in COLLECTION_ACTIONS.
+    },
+    async (tx, session): Promise<UnsignedNoteQueue> => {
+      const clinicWide = session.permissions.has('audit.read');
+
+      const rows = await tx
+        .select({
+          id: visitNote.id,
+          patientId: visitNote.patientId,
+          legalFirstName: patient.legalFirstName,
+          legalLastName: patient.legalLastName,
+          mrn: patient.mrn,
+          authorId: visitNote.authorUserId,
+          authorName: userAccount.fullName,
+          startedAt: visitNote.createdAt,
+          lastTouchedAt: visitNote.updatedAt,
+        })
+        .from(visitNote)
+        .innerJoin(userAccount, eq(userAccount.id, visitNote.authorUserId))
+        .innerJoin(patient, eq(patient.id, visitNote.patientId))
+        .where(
+          and(
+            eq(visitNote.clinicId, session.clinicId),
+            eq(visitNote.status, 'draft'),
+            isNull(visitNote.archivedAt),
+            // The scoping decision, expressed in SQL rather than filtered afterwards:
+            // an unauthorised row is never read, not read and then discarded.
+            clinicWide ? undefined : eq(visitNote.authorUserId, session.userId),
+          ),
+        )
+        .orderBy(asc(visitNote.createdAt));
+
+      return {
+        scope: clinicWide ? 'clinic' : 'mine',
+        rows: rows.map((r) => ({
+          id: r.id,
+          patientId: r.patientId,
+          patientName: `${r.legalLastName}, ${r.legalFirstName}`,
+          mrn: r.mrn,
+          authorName: r.authorName,
+          authoredByMe: r.authorId === session.userId,
+          startedAt: r.startedAt,
+          lastTouchedAt: r.lastTouchedAt,
+        })),
+      };
+    },
+    (result) => ({ resultCount: result.rows.length, labels: { scope: result.scope } }),
   );
 }

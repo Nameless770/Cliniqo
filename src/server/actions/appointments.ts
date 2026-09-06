@@ -8,7 +8,7 @@ import {
   changeStatusInput,
   rescheduleAppointmentInput,
 } from '@/lib/appointment-schemas';
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { AuthorizationError } from '@/server/auth/authorize';
 import {
   bookAppointment,
@@ -49,7 +49,7 @@ export async function bookAppointmentAction(
   _previous: AppointmentFormState,
   formData: FormData,
 ): Promise<AppointmentFormState> {
-  const parsed = bookAppointmentInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = bookAppointmentInput.safeParse(formFields(formData));
 
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
@@ -64,7 +64,9 @@ export async function bookAppointmentAction(
               'That slot was taken while you were booking. Pick another time.'
             : result.reason === 'closed'
               ? 'The clinic or that clinician is unavailable then. Pick another time.'
-              : 'That patient could not be found.',
+              : result.reason === 'invalid_time'
+                ? 'That is not a valid date and time.'
+                : 'That patient could not be found.',
       };
     }
 
@@ -83,15 +85,18 @@ export async function rescheduleAppointmentAction(
   formData: FormData,
 ): Promise<AppointmentFormState> {
   const parsed = rescheduleAppointmentInput.safeParse(
-    Object.fromEntries(formData.entries()),
+    formFields(formData),
   );
 
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
+    /* The raw wall-clock string, NOT a Date. `new Date()` here would parse it in the
+       server's timezone and quietly move the appointment; the clinic's zone is only
+       known further down, so the conversion happens there. */
     const result = await rescheduleAppointment(
       parsed.data.appointmentId,
-      new Date(parsed.data.startsAt),
+      parsed.data.startsAt,
       parsed.data.durationMinutes,
     );
 
@@ -102,7 +107,9 @@ export async function rescheduleAppointmentAction(
             ? 'That slot is already taken. Pick another time.'
             : result.reason === 'closed'
               ? 'The clinic or that clinician is unavailable then.'
-              : 'That appointment could not be found.',
+              : result.reason === 'invalid_time'
+                ? 'That is not a valid date and time.'
+                : 'That appointment could not be found.',
       };
     }
 
@@ -119,7 +126,7 @@ export async function changeStatusAction(
   _previous: AppointmentFormState,
   formData: FormData,
 ): Promise<AppointmentFormState> {
-  const parsed = changeStatusInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = changeStatusInput.safeParse(formFields(formData));
 
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
@@ -153,7 +160,7 @@ export async function cancelAppointmentAction(
   _previous: AppointmentFormState,
   formData: FormData,
 ): Promise<AppointmentFormState> {
-  const parsed = cancelAppointmentInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = cancelAppointmentInput.safeParse(formFields(formData));
 
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 

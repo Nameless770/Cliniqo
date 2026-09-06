@@ -50,12 +50,16 @@ export const AUDIT_ACTIONS = [
   'appointment.checkin',
 
   'note.read',
+  /* A work queue spanning many patients — see COLLECTION_ACTIONS below. */
+  'note.search',
   'note.create',
   'note.update',
   'note.sign',
   'note.amend',
 
   'prescription.read',
+  /* Likewise: a prescriber's recent-activity list, not one patient's history. */
+  'prescription.search',
   'prescription.create',
   'prescription.cancel',
 
@@ -105,11 +109,13 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'appointment.cancel',
   'appointment.checkin',
   'note.read',
+  'note.search',
   'note.create',
   'note.update',
   'note.sign',
   'note.amend',
   'prescription.read',
+  'prescription.search',
   'prescription.create',
   'prescription.cancel',
   'breakglass.use',
@@ -130,4 +136,6 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
 export const COLLECTION_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'patient.search',
   'appointment.search',
+  'note.search',
+  'prescription.search',
 ]);

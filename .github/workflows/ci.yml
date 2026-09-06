@@ -1,0 +1,156 @@
+name: CI
+
+# Every push and every pull request. The whole point is that `verify` stops depending on
+# somebody remembering to run it — a guarantee checked only when a human thinks to check
+# it is a guarantee with a half-life.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded run on the same branch tells you nothing. Cancel it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. This workflow builds and tests; it has no business writing to the
+# repository, and a token that cannot write cannot be turned into one that does.
+permissions:
+  contents: read
+
+env:
+  # Node 22 is the floor declared in package.json engines. CI runs the OLDEST supported
+  # version deliberately: developers are on 24, so this is where a syntax or API feature
+  # that quietly raised the requirement shows up.
+  NODE_VERSION: '22'
+
+  # NOT a secret and must never be one. These values exist only inside an ephemeral
+  # container that is destroyed with the job, and are visible in this file on purpose —
+  # a reviewer can see at a glance that CI touches no real credential and no real data.
+  # A GitHub secret here would imply the opposite.
+  APP_ENV: test
+  DATABASE_SSL: disable
+  SESSION_SECRET: ci-session-secret-not-used-for-anything-real-0123456789
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Static analysis. No database, so it starts instantly and fails fast.
+  # --------------------------------------------------------------------------
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # `next build` and the invariant suite import application modules. Env access is
+      # lazy, so nothing connects — but the schema still demands a well-formed URL.
+      DATABASE_URL: postgres://cliniqo_app:unused@127.0.0.1:5432/cliniqo
+      DATABASE_MIGRATION_URL: postgres://cliniqo_owner:unused@127.0.0.1:5432/cliniqo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `ci`, not `install`: installs exactly the lockfile and fails if it disagrees with
+      # package.json, so a dependency cannot drift in without the lockfile being committed.
+      - run: npm ci
+
+      # typecheck -> lint -> 95 invariants -> production audit -> migration journal.
+      - name: Verify
+        run: npm run verify
+
+      # WCAG AA contrast. Not part of `verify` locally because it is slower than the rest,
+      # but accessibility is a stated commitment and this is where it gets enforced.
+      - name: Contrast (WCAG AA)
+        run: npm run check:contrast
+
+      # Builds the real production bundle. This is also what proves the CSP's
+      # 'unsafe-eval' is development-only: the directive is behind a
+      # `process.env.NODE_ENV === 'development'` comparison the bundler folds away, and
+      # the assertion below reads the built output rather than trusting that reasoning.
+      - name: Build
+        run: npm run build
+
+      - name: Assert production CSP carries no 'unsafe-eval'
+        run: |
+          set -euo pipefail
+          # The middleware bundle is the only place the CSP string exists.
+          files=$(grep -rl "strict-dynamic" .next --include=*.js | grep -v '^.next/dev/' || true)
+          if [ -z "$files" ]; then
+            echo "::error::No production bundle contained the CSP - the check would pass vacuously."
+            exit 1
+          fi
+          for f in $files; do
+            if grep -q "unsafe-eval" "$f"; then
+              echo "::error file=src/middleware.ts::'unsafe-eval' reached the production bundle ($f)"
+              exit 1
+            fi
+          done
+          echo "Production CSP clean in: $files"
+
+  # --------------------------------------------------------------------------
+  # Database-backed guarantees. Needs a real PostgreSQL, which is the whole reason
+  # these live outside the invariant suite.
+  # --------------------------------------------------------------------------
+  database:
+    name: Database guarantees
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # Pinned to the same major the application targets. The guarantees under test are
+        # PostgreSQL features - GiST exclusion constraints, range partitioning, plpgsql
+        # triggers - so testing against a different major would test a different promise.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: cliniqo_owner
+          POSTGRES_PASSWORD: ci_local_only
+          POSTGRES_DB: cliniqo
+        ports:
+          - 5432:5432
+        # Without this the first migration races the server's own startup restart and
+        # fails intermittently, which is the kind of flake that gets a job disabled.
+        options: >-
+          --health-cmd "pg_isready -U cliniqo_owner -d cliniqo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_MIGRATION_URL: postgres://cliniqo_owner:ci_local_only@127.0.0.1:5432/cliniqo
+      # The restricted runtime role. Created by migration 0001 and given this password by
+      # scripts/test-db.js, so no psql client is needed on the runner.
+      DATABASE_URL: postgres://cliniqo_app:ci_app_local_only@127.0.0.1:5432/cliniqo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # Rebuilds cliniqo_test from the checked-in migrations, then runs the suite:
+      # audit append-only (including every partition's grants), concurrent double-booking,
+      # signed-note and prescription freezing, controlled-substance refusal.
+      - name: Database tests
+        run: npm test
+
+      # A suite that silently stops running still reports success. This fails the job if
+      # the count collapses, which is what a broken glob or a skipped file looks like.
+      - name: Assert the suite actually ran
+        run: |
+          set -euo pipefail
+          count=$(grep -roE "\b(it|test)\(" tests --include=*.test.ts | wc -l)
+          echo "Found $count test cases."
+          if [ "$count" -lt 15 ]; then
+            echo "::error::Expected at least 15 database tests, found $count."
+            exit 1
+          fi

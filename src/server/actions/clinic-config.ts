@@ -8,7 +8,7 @@ import {
   clinicHoursInput,
   clinicInput,
 } from '@/lib/clinic-config-schemas';
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { AuthorizationError } from '@/server/auth/authorize';
 import {
   createAppointmentType,
@@ -43,7 +43,7 @@ export async function updateClinicAction(
   _previous: ConfigFormState,
   formData: FormData,
 ): Promise<ConfigFormState> {
-  const parsed = clinicInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = clinicInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
@@ -64,7 +64,7 @@ export async function createAppointmentTypeAction(
   _previous: ConfigFormState,
   formData: FormData,
 ): Promise<ConfigFormState> {
-  const parsed = appointmentTypeInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = appointmentTypeInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
@@ -93,7 +93,7 @@ export async function toggleAppointmentTypeAction(
 ): Promise<ConfigFormState> {
   const parsed = z
     .object({ typeId: z.uuid(), isActive: z.enum(['true', 'false']) })
-    .safeParse(Object.fromEntries(formData.entries()));
+    .safeParse(formFields(formData));
 
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 

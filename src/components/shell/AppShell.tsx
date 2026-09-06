@@ -113,6 +113,14 @@ export function AppShell({
           </div>
 
           {/*
+            Not in the sidebar: every account can reach this regardless of role, so it
+            belongs beside the account block rather than in a permission-filtered list.
+          */}
+          <Link href="/account/password" className={styles.accountLink}>
+            Change password
+          </Link>
+
+          {/*
             Sign out is a FORM, not a link.
             A GET link can be triggered by any <img> tag or prefetch, which turns
             logout into a trivial denial-of-service against a working clinician. State

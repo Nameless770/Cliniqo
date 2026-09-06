@@ -17,6 +17,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
 import { ROLE_PERMISSIONS, permissionsForRoles } from '../src/lib/permissions.ts';
+import { NAV_ITEMS } from '../src/lib/roles.ts';
 import { identifyingPatientInput } from '../src/lib/patient-schemas.ts';
 import {
   PHI_ACTIONS,
@@ -57,6 +58,8 @@ const nextConfig = read('next.config.ts');
 const eslintCfg = read('eslint.config.mjs');
 const notesDa = read('src/server/data-access/notes.ts');
 const patientsDa = read('src/server/data-access/patients.ts');
+const staffDa = read('src/server/data-access/staff.ts');
+const staffLayout = read('src/app/(staff)/layout.tsx');
 
 /* ------------------------------------------- 1. minimum necessary boundaries */
 
@@ -274,6 +277,25 @@ check('CSP (F2)', 'nonce generated per request', /nonce-\$\{nonce\}/.test(middle
     'CSP (F2)',
     'script-src carries a nonce and strict-dynamic',
     scriptSrc.includes('nonce-') && scriptSrc.includes('strict-dynamic'),
+  );
+
+  /*
+   * 'unsafe-eval' is allowed in DEVELOPMENT only — React's dev build needs eval() to
+   * reconstruct stack traces across the server/client boundary, and denying it only
+   * destroys error messages.
+   *
+   * This asserts it can never reach production: it must not sit in the directive
+   * unconditionally, and its only path in must be behind a NODE_ENV === 'development'
+   * comparison, which the bundler folds to a literal false in a production build.
+   * Fixed-string .includes(), not a regex — see the note at the top of this file.
+   */
+  const mentionsEval = middlewareCode.includes('unsafe-eval');
+  check(
+    'CSP (F2)',
+    "'unsafe-eval' is absent, or development-gated and never in the directive",
+    !mentionsEval ||
+      (!scriptSrc.includes('unsafe-eval') &&
+        middlewareCode.includes("process.env.NODE_ENV === 'development'")),
   );
 }
 check(
@@ -497,6 +519,261 @@ const uuidOk = identifyingPatientInput.safeParse({
 });
 check('Validation', 'a well-formed payload is still accepted', uuidOk.success);
 void randomUUID;
+
+/* ------------------------------------------------- Forced password change */
+
+/*
+ * `must_change_password` was stored, selected into the session, and read by NOTHING for
+ * several phases. A credential somebody else has seen is a shared login until it is
+ * replaced, which 164.312(a)(2)(i) does not permit — so the flag has to actually stop
+ * the user, and a self-service change has to exist for them to satisfy it.
+ *
+ * Fixed-string .includes(), not regexes — see the note at the top of this file.
+ */
+{
+  const layoutCode = stripComments(staffLayout);
+  const staffCode = stripComments(staffDa);
+
+  check(
+    'Password change',
+    'must_change_password actually gates the staff layout',
+    layoutCode.includes('active.mustChangePassword') &&
+      layoutCode.includes('redirect(PASSWORD_CHANGE_PATH)'),
+  );
+  check(
+    'Password change',
+    'the change page itself is exempt (no redirect loop)',
+    layoutCode.includes("pathname !== PASSWORD_CHANGE_PATH"),
+  );
+  check(
+    'Password change',
+    'changing a password re-authenticates with the current one',
+    staffCode.includes('verifyPassword(currentPassword') &&
+      staffCode.includes("reason: 'wrong_password'"),
+  );
+  check(
+    'Password change',
+    'a failed re-authentication is audited',
+    staffCode.includes("reason: 'wrong_current_password'"),
+  );
+  check(
+    'Password change',
+    'a successful change revokes every session',
+    staffCode.includes('revokeAllSessionsForUser(active.userId'),
+  );
+  check(
+    'Password change',
+    'an account with no usable password cannot self-serve',
+    staffCode.includes('UNUSABLE_PASSWORD') &&
+      staffCode.includes("reason: 'no_password_set'"),
+  );
+}
+
+/* ------------------------------------------------- Form input boundaries */
+
+/*
+ * Two rules that each cost a real, silent failure to learn.
+ *
+ * 1. NO ACTION PARSES RAW FormData. React ships its server-action encoding in the same
+ *    FormData as the user's input ($ACTION_REF_n, $ACTION_n:m, $ACTION_KEY). Against a
+ *    .strict() schema those become an `unrecognized_keys` issue with an EMPTY path, which
+ *    lands under `_form` — a key no form renders. The observed symptom was a "Book
+ *    appointment" button that did nothing at all: no row, no error, no message. Every
+ *    action must go through `formFields()`, which strips them.
+ *
+ * 2. APPOINTMENT TIMES ARE CONVERTED IN THE CLINIC'S ZONE. `new Date('2027-06-15T09:00')`
+ *    reads an offset-less string in the SERVER's timezone, so the instant a patient is
+ *    booked for depended on how the container was configured — seven hours out between a
+ *    New York clinic and a developer in Africa/Cairo. `zonedWallClock` takes the clinic
+ *    timezone explicitly.
+ */
+{
+  const actionFiles = readdirSync('src/server/actions').filter((f) => f.endsWith('.ts'));
+  const rawParsers = actionFiles.filter((f) =>
+    stripComments(read(`src/server/actions/${f}`)).includes(
+      'Object.fromEntries(formData.entries())',
+    ),
+  );
+  check(
+    'Form input',
+    `no action parses raw FormData${rawParsers.length ? ` (${rawParsers.join(', ')})` : ''}`,
+    rawParsers.length === 0,
+  );
+
+  const usesHelper = actionFiles.filter((f) =>
+    stripComments(read(`src/server/actions/${f}`)).includes('formFields(formData)'),
+  );
+  check(
+    'Form input',
+    `actions validate through formFields (${usesHelper.length} files)`,
+    usesHelper.length > 0,
+  );
+
+  const patientSchemas = stripComments(read('src/lib/patient-schemas.ts'));
+  check(
+    'Form input',
+    'formFields strips the framework prefix',
+    patientSchemas.includes("key.startsWith('$ACTION')"),
+  );
+
+  const apptDa = stripComments(read('src/server/data-access/appointments.ts'));
+  check(
+    'Form input',
+    'appointment times converted in the clinic timezone',
+    apptDa.includes('zonedWallClock(input.startsAt, session.clinicTimeZone)') &&
+      apptDa.includes('zonedWallClock(startsAt, session.clinicTimeZone)'),
+  );
+  check(
+    'Form input',
+    'no server-timezone parse of a submitted appointment time',
+    !apptDa.includes('new Date(input.startsAt)') && !apptDa.includes('new Date(startsAt)'),
+  );
+}
+
+/* --------------------------------------------------- Unreachable actions */
+
+/*
+ * Every exported server action must be reachable from the UI.
+ *
+ * This session found three features fully built, validated, audited — and callable by
+ * nothing: the allergy write path, `startNoteAction`, and the five listed below. The code
+ * was correct in every case; it simply had no caller, so the feature did not exist. No
+ * type error, no lint error, no invariant caught any of them, because nothing is WRONG
+ * with an uncalled function.
+ *
+ * Reachability is transitive: `submitNoteAction` dispatches to `saveDraftAction` and
+ * `signNoteAction` by intent, so those count as reached. Bodies are sliced per function
+ * rather than per file — otherwise one reachable action vouches for every neighbour that
+ * happens to share its module.
+ *
+ * KNOWN_UNWIRED is DEBT, not approval. Each entry is a server action with no user-facing
+ * path, listed so the check fails on NEW ones instead of being disabled. Deleting an entry
+ * without building its UI turns this check red, which is the point.
+ */
+{
+  const walkSrc = (dir, acc = []) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walkSrc(p, acc);
+      else if (/\.(tsx|ts)$/.test(entry.name)) acc.push(p);
+    }
+    return acc;
+  };
+
+  /* Each of these is a missing screen, named so the gap is legible:
+       rescheduleAppointmentAction - no reschedule UI
+       cancelAppointmentAction     - StatusActions defers it: "cancellation needs a
+                                     reason; separate flow". That flow does not exist.
+       archivePatientAction        - the patient list can FILTER by archived, but nothing
+       unarchivePatientAction        can archive or restore a record
+       cancelPrescriptionAction    - corrections work (cancel + supersede); plain
+                                     withdrawal without a replacement has no button */
+  const KNOWN_UNWIRED = new Set([
+    'rescheduleAppointmentAction',
+    'cancelAppointmentAction',
+    'archivePatientAction',
+    'unarchivePatientAction',
+    'cancelPrescriptionAction',
+  ]);
+
+  const uiText = [...walkSrc('src/app'), ...walkSrc('src/components')]
+    .map((f) => readFileSync(f, 'utf8'))
+    .join('\n');
+
+  const bodyOf = new Map();
+  const DECL = /export async function ([A-Za-z0-9_]+)/g;
+  for (const f of walkSrc('src/server/actions')) {
+    const src = readFileSync(f, 'utf8');
+    const hits = [...src.matchAll(DECL)];
+    hits.forEach((m, i) => {
+      const end = i + 1 < hits.length ? hits[i + 1].index : src.length;
+      bodyOf.set(m[1], src.slice(m.index, end));
+    });
+  }
+
+  const names = [...bodyOf.keys()];
+  // Fixed-string .includes(), never a built regex - see the note at the top of this file.
+  const reachable = new Set(names.filter((n) => uiText.includes(n)));
+
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const n of names) {
+      if (reachable.has(n)) continue;
+      for (const r of reachable) {
+        if (r !== n && bodyOf.get(r).includes(n)) {
+          reachable.add(n);
+          grew = true;
+          break;
+        }
+      }
+    }
+  }
+
+  const orphans = names.filter((n) => !reachable.has(n) && !KNOWN_UNWIRED.has(n));
+  check(
+    'Reachability',
+    `no NEW unreachable server action${orphans.length ? ` (found: ${orphans.join(', ')})` : ''}`,
+    orphans.length === 0,
+  );
+
+  // Guards the guard: if someone wires one up, the stale entry must be removed.
+  const staleDebt = [...KNOWN_UNWIRED].filter((n) => reachable.has(n));
+  check(
+    'Reachability',
+    `KNOWN_UNWIRED has no stale entries${staleDebt.length ? ` (now wired: ${staleDebt.join(', ')})` : ''}`,
+    staleDebt.length === 0,
+  );
+
+  check(
+    'Reachability',
+    `every action still accounted for (${names.length} total, ${KNOWN_UNWIRED.size} unwired)`,
+    names.length > 0,
+  );
+}
+
+/* ------------------------------------------------------- Navigation targets */
+
+/*
+ * Every sidebar link must resolve to a page that exists.
+ *
+ * Not a security property in itself, but it is here because the failure mode was real and
+ * long-lived: /notes and /prescriptions sat in the sidebar for three phases returning 404,
+ * and nothing failed. A broken link to a clinical worklist is a feature nobody can use and
+ * a control nobody can exercise — the unsigned-notes queue exists so notes are not
+ * silently forgotten, which it cannot do while it 404s.
+ *
+ * Routes are resolved from the filesystem rather than hardcoded, so adding a route group
+ * or moving a page keeps the check honest.
+ */
+{
+  const routes = new Set();
+
+  const walk = (dir, route) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        if (/^page\.(tsx|ts|jsx|js)$/.test(entry.name)) routes.add(route || '/');
+        continue;
+      }
+      const seg = entry.name;
+      // Route groups "(staff)" and private folders "_components" add no URL segment.
+      const nextRoute =
+        seg.startsWith('(') && seg.endsWith(')') ? route : `${route}/${seg}`;
+      if (seg.startsWith('_')) continue;
+      walk(`${dir}/${seg}`, nextRoute);
+    }
+  };
+
+  if (existsSync('src/app')) walk('src/app', '');
+
+  const missing = NAV_ITEMS.filter((item) => !routes.has(item.href)).map((i) => i.href);
+
+  check(
+    'Navigation',
+    `every sidebar link resolves${missing.length ? ` (missing: ${missing.join(', ')})` : ''}`,
+    missing.length === 0,
+  );
+}
 
 /* --------------------------------------------------------------- report */
 

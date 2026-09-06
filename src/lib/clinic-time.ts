@@ -104,3 +104,60 @@ export function shiftDate(dateISO: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * The UTC instant of a WALL-CLOCK time in `timeZone`.
+ *
+ * The missing half of this module. Everything above renders or bounds an instant in
+ * clinic time; this is the only function that goes the other way — taking what a human
+ * typed into a `datetime-local` field and deciding which instant they meant.
+ *
+ * IT HAS TO EXIST, because `new Date('2027-03-01T09:00')` is not a neutral parse. A
+ * date-time string with no offset is interpreted in the JavaScript runtime's OWN
+ * timezone, so the appointment a receptionist books lands wherever the SERVER happens to
+ * be configured. On a container running UTC, a New York clinic's 09:00 is stored as
+ * 09:00Z and displayed back as 04:00. The clinic's timezone — the one thing that should
+ * decide this — is not consulted at all.
+ *
+ * Two passes, for the same reason as `zonedStartOfDay`: on a DST boundary the offset
+ * differs either side of the target, and a single-pass guess lands on the wrong side.
+ *
+ * @param localISO Wall-clock 'YYYY-MM-DDTHH:mm' (seconds optional), as a browser's
+ *                 datetime-local input produces. NOT an instant — it carries no offset.
+ */
+export function zonedWallClock(localISO: string, timeZone: string): Date {
+  const trimmed = localISO.trim();
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2}))?/);
+  if (!match) return new Date(NaN);
+
+  // Read the wall-clock digits as if they were UTC, then subtract the real offset.
+  const naive = new Date(`${match[1]}T${match[2]}:${match[3] ?? '00'}Z`);
+  if (Number.isNaN(naive.getTime())) return naive;
+
+  const firstPass = new Date(naive.getTime() - offsetMinutesAt(naive, timeZone) * 60_000);
+  return new Date(naive.getTime() - offsetMinutesAt(firstPass, timeZone) * 60_000);
+}
+
+/**
+ * The inverse: an instant rendered as 'YYYY-MM-DDTHH:mm' in `timeZone`.
+ *
+ * For pre-filling a `datetime-local` input. `toISOString().slice(0,16)` would show the
+ * UTC wall clock, which is the same bug in the other direction — a reschedule form would
+ * open showing a different time from the one on the schedule beside it.
+ */
+export function formatWallClockInZone(instant: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(instant);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  // en-CA renders hour 24 for midnight in some runtimes; normalise to 00.
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`;
+}

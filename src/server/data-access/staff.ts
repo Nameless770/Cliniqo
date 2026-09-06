@@ -485,3 +485,119 @@ export async function redeemSetupToken(
     return { ok: true, email: found.email };
   });
 }
+
+/* -------------------------------------------------------------------------- */
+/* Self-service password change — AUTHENTICATED, no permission required        */
+/* -------------------------------------------------------------------------- */
+
+export type PasswordChangeResult =
+  | { ok: true }
+  | { ok: false; reason: 'wrong_password' | 'reused_password' | 'no_password_set' };
+
+/**
+ * Change your own password.
+ *
+ * WHY THIS IS NOT BEHIND A PERMISSION
+ * -----------------------------------
+ * Every account may change its own password; gating that on a grant would mean an
+ * administrator could lock someone out of their own credentials, and would break the
+ * forced-change path below — the account with an expired credential is exactly the one
+ * least able to satisfy an extra check. So it runs outside `auditedOperation`, which
+ * requires a permission, and writes its own audit row instead. Same precedent as
+ * `redeemSetupToken` above. It touches no patient table, so the PHI choke point does not
+ * apply; `user_account` is identity, not a chart.
+ *
+ * THE CURRENT PASSWORD IS REQUIRED EVEN THOUGH THE CALLER IS SIGNED IN
+ * --------------------------------------------------------------------
+ * A live session is not proof of identity at the keyboard — an unattended terminal or a
+ * stolen cookie is a session too. Without this check, a few seconds at someone's desk is
+ * enough to take their account permanently. Re-authenticating turns that into an attack
+ * needing the password, which is the thing being changed.
+ *
+ * The one exception is an account whose password is unusable (`UNUSABLE_PASSWORD`) — a
+ * staff member who was issued a setup link and never redeemed it has no current password
+ * to prove. That path is refused here rather than waved through: they must use the setup
+ * link, which is a single-use token an administrator issued, not a self-service reset.
+ *
+ * EVERY SESSION IS REVOKED, INCLUDING THIS ONE
+ * --------------------------------------------
+ * If the password is being changed because it may be known to someone else, leaving any
+ * session alive defeats the change — and we cannot tell the owner's other sessions from
+ * an intruder's. Signing everyone out is the only safe reading, so the caller is returned
+ * to the login form.
+ */
+export async function changeOwnPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<PasswordChangeResult> {
+  const { requireSession } = await import('@/server/auth/session');
+  const { verifyPassword } = await import('@/server/auth/password');
+  const { writeAuditEvent } = await import('@/server/audit/log');
+  const { requestMeta, safeInet } = await import('@/server/auth/session');
+
+  const active = await requireSession();
+  const db = getDb();
+
+  const [account] = await db
+    .select({ passwordHash: userAccount.passwordHash })
+    .from(userAccount)
+    .where(and(eq(userAccount.id, active.userId), isNull(userAccount.archivedAt)))
+    .limit(1);
+
+  if (!account || account.passwordHash === UNUSABLE_PASSWORD) {
+    return { ok: false, reason: 'no_password_set' };
+  }
+
+  const { ip: rawIp } = await requestMeta();
+  const ip = safeInet(rawIp);
+
+  const currentValid = await verifyPassword(currentPassword, account.passwordHash);
+  if (!currentValid) {
+    /* A failed re-authentication is a security event: it is what an attempted account
+       takeover from an open session looks like. Recorded with no password material. */
+    await db.transaction(async (tx) => {
+      await writeAuditEvent(tx, {
+        clinicId: active.clinicId,
+        actorUserId: active.userId,
+        actorIp: ip,
+        action: 'auth.password_change',
+        outcome: 'denied',
+        entityType: 'user_account',
+        entityId: active.userId,
+        metadata: { reason: 'wrong_current_password' },
+      });
+    });
+    return { ok: false, reason: 'wrong_password' };
+  }
+
+  // Reusing the same password would clear must_change_password without changing anything.
+  const reused = await verifyPassword(newPassword, account.passwordHash);
+  if (reused) return { ok: false, reason: 'reused_password' };
+
+  const passwordHash = await hashPassword(newPassword);
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(userAccount)
+      .set({ passwordHash, passwordChangedAt: now, mustChangePassword: false })
+      .where(eq(userAccount.id, active.userId));
+
+    await writeAuditEvent(tx, {
+      clinicId: active.clinicId,
+      actorUserId: active.userId,
+      actorIp: ip,
+      action: 'auth.password_change',
+      outcome: 'allowed',
+      entityType: 'user_account',
+      entityId: active.userId,
+      metadata: { via: 'self_service' },
+    });
+  });
+
+  /* After the commit: a revocation that ran inside the transaction and then rolled back
+     would sign everyone out without changing the password. */
+  await revokeAllSessionsForUser(active.userId, 'admin_revoke');
+
+  return { ok: true };
+}

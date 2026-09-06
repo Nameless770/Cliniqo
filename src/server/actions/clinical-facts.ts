@@ -8,7 +8,7 @@ import {
   allergyStatusInput,
   endFlagInput,
 } from '@/lib/clinical-fact-schemas';
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { AuthorizationError } from '@/server/auth/authorize';
 import {
   addAllergy,
@@ -47,7 +47,7 @@ export async function addAllergyAction(
   _previous: ClinicalFactState,
   formData: FormData,
 ): Promise<ClinicalFactState> {
-  const parsed = addAllergyInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = addAllergyInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const { patientId, ...input } = parsed.data;
@@ -67,7 +67,7 @@ export async function setAllergyStatusAction(
   _previous: ClinicalFactState,
   formData: FormData,
 ): Promise<ClinicalFactState> {
-  const parsed = allergyStatusInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = allergyStatusInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
@@ -99,7 +99,7 @@ export async function addFlagAction(
   _previous: ClinicalFactState,
   formData: FormData,
 ): Promise<ClinicalFactState> {
-  const parsed = addFlagInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = addFlagInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const { patientId, ...input } = parsed.data;
@@ -119,7 +119,7 @@ export async function endFlagAction(
   _previous: ClinicalFactState,
   formData: FormData,
 ): Promise<ClinicalFactState> {
-  const parsed = endFlagInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = endFlagInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {

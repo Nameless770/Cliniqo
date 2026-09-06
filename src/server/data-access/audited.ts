@@ -324,7 +324,18 @@ export function auditedSearch<T>(
    * "HIV clinic" would otherwise write a diagnosis into the audit log, which is exactly
    * the leak this layer exists to prevent.
    */
-  summarise?: (result: T) => { resultCount: number; resultIds?: string[] },
+  summarise?: (result: T) => {
+    resultCount: number;
+    resultIds?: string[];
+    /**
+     * Low-cardinality, non-PHI labels describing WHICH slice was returned — e.g. whether
+     * a worklist came back scoped to one author or clinic-wide. Primitives only, and the
+     * same prohibition applies as above: never the query, never a name, never a
+     * diagnosis. It exists so a reviewer can tell a routine self-scoped read from a
+     * broad one without re-running the query against today's data.
+     */
+    labels?: Record<string, string | number | boolean>;
+  },
 ): Promise<T> {
   return auditedOperation(
     { ...spec, action: spec.action ?? 'patient.search' },
@@ -335,6 +346,7 @@ export function auditedSearch<T>(
           return {
             resultCount: summary.resultCount,
             ...(summary.resultIds ? { resultIds: summary.resultIds } : {}),
+            ...(summary.labels ?? {}),
           };
         }
       : undefined,

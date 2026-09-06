@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { AuthorizationError } from '@/server/auth/authorize';
 import { requestBreakGlass, reviewBreakGlass } from '@/server/data-access/break-glass';
 
@@ -52,7 +52,7 @@ export async function requestBreakGlassAction(
   _previous: ComplianceFormState,
   formData: FormData,
 ): Promise<ComplianceFormState> {
-  const parsed = breakGlassInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = breakGlassInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
@@ -82,7 +82,7 @@ export async function reviewBreakGlassAction(
   _previous: ComplianceFormState,
   formData: FormData,
 ): Promise<ComplianceFormState> {
-  const parsed = reviewInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = reviewInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {

@@ -10,7 +10,7 @@ import {
   signNoteInput,
   startNoteInput,
 } from '@/lib/note-schemas';
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { AuthorizationError } from '@/server/auth/authorize';
 import { addAddendum, createNote, saveDraft, signNote } from '@/server/data-access/notes';
 
@@ -78,7 +78,7 @@ export async function startNoteAction(
   _previous: NoteFormState,
   formData: FormData,
 ): Promise<NoteFormState> {
-  const parsed = startNoteInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = startNoteInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   try {
@@ -103,7 +103,7 @@ export async function saveDraftAction(
   _previous: NoteFormState,
   formData: FormData,
 ): Promise<NoteFormState> {
-  const parsed = saveDraftInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = saveDraftInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const { noteId, patientId, version, ...content } = parsed.data;
@@ -132,7 +132,7 @@ export async function signNoteAction(
   _previous: NoteFormState,
   formData: FormData,
 ): Promise<NoteFormState> {
-  const parsed = signNoteInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = signNoteInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const draft = noteContentInput.safeParse({
@@ -182,7 +182,7 @@ export async function addAddendumAction(
   _previous: NoteFormState,
   formData: FormData,
 ): Promise<NoteFormState> {
-  const parsed = addendumInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = addendumInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const { noteId, patientId, ...content } = parsed.data;

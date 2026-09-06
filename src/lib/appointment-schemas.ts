@@ -54,11 +54,25 @@ export function canTransition(from: AppointmentStatus, to: AppointmentStatus): b
 
 /* -------------------------------------------------------------------------- */
 
+/*
+ * A WALL-CLOCK date and time in the clinic's zone — 'YYYY-MM-DDTHH:mm', exactly what a
+ * browser's datetime-local input submits. Deliberately NOT an instant.
+ *
+ * The shape is pinned with a regex rather than accepted on `new Date(v)` not being NaN.
+ * That older check passed things the converter cannot use (a bare '2027-03-01'), and
+ * worse, it evaluated the string in the SERVER's timezone — the very confusion this type
+ * now exists to prevent. Validation and conversion must agree on the shape, or one of
+ * them is deciding something the other did not intend.
+ */
 const isoDateTime = z
   .string()
   .min(1, 'Choose a date and time.')
+  .regex(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/,
+    'Choose a date and time.',
+  )
   .refine(
-    (v) => !Number.isNaN(new Date(v).getTime()),
+    (v) => !Number.isNaN(new Date(`${v}Z`).getTime()),
     'That is not a valid date and time.',
   );
 

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { ROLE_CODES } from '@/lib/roles';
 import { AuthorizationError } from '@/server/auth/authorize';
 import {
@@ -167,7 +167,7 @@ export async function setStatusAction(
       userId: z.uuid(),
       status: z.enum(['active', 'suspended', 'deactivated']),
     })
-    .safeParse(Object.fromEntries(formData.entries()));
+    .safeParse(formFields(formData));
 
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
@@ -225,7 +225,7 @@ export async function claimAccountAction(
   _previous: StaffFormState,
   formData: FormData,
 ): Promise<StaffFormState> {
-  const parsed = claimInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = claimInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const { ip: rawIp } = await requestMeta();

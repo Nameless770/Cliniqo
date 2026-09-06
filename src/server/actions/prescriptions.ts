@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
+import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import {
   cancelPrescriptionInput,
   correctPrescriptionInput,
@@ -61,7 +61,7 @@ export async function createPrescriptionAction(
   _previous: PrescriptionFormState,
   formData: FormData,
 ): Promise<PrescriptionFormState> {
-  const raw = Object.fromEntries(formData.entries());
+  const raw = formFields(formData);
   // An empty optional uuid arrives as "" and must not be parsed as a bad uuid.
   if (raw['visitNoteId'] === '') delete raw['visitNoteId'];
 
@@ -92,7 +92,7 @@ export async function correctPrescriptionAction(
   formData: FormData,
 ): Promise<PrescriptionFormState> {
   const parsed = correctPrescriptionInput.safeParse(
-    Object.fromEntries(formData.entries()),
+    formFields(formData),
   );
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
@@ -124,7 +124,7 @@ export async function cancelPrescriptionAction(
   formData: FormData,
 ): Promise<PrescriptionFormState> {
   const parsed = cancelPrescriptionInput.safeParse(
-    Object.fromEntries(formData.entries()),
+    formFields(formData),
   );
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 

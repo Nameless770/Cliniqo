@@ -1,15 +1,21 @@
 import 'server-only';
 
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
 
-import { medication, prescription, prescriptionItem, userAccount } from '@/db/schema';
+import {
+  medication,
+  patient,
+  prescription,
+  prescriptionItem,
+  userAccount,
+} from '@/db/schema';
 import type {
   CreatePrescriptionInput,
   PrescriptionItemInput,
 } from '@/lib/prescription-schemas';
 import type { Tx } from '@/server/audit/log';
 
-import { auditedRead, auditedWrite } from './audited';
+import { auditedRead, auditedSearch, auditedWrite } from './audited';
 
 /**
  * Prescription data access.
@@ -396,5 +402,147 @@ export async function cancelPrescription(
         ? { ok: true, prescriptionId }
         : { ok: false, reason: 'not_found' };
     },
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cross-patient prescribing activity                                         */
+/* -------------------------------------------------------------------------- */
+
+export type RecentPrescriptionRow = {
+  id: string;
+  patientId: string;
+  patientName: string;
+  mrn: string;
+  prescriberName: string;
+  prescribedByMe: boolean;
+  status: 'draft' | 'signed' | 'printed' | 'cancelled';
+  issuedAt: Date;
+  cancelledAt: Date | null;
+  supersedesPrescriptionId: string | null;
+  /** Medication names only — no dose, route, or indication. See the note below. */
+  medicationNames: string[];
+};
+
+export type RecentPrescriptions = {
+  rows: RecentPrescriptionRow[];
+  scope: 'mine' | 'clinic';
+  windowDays: number;
+};
+
+const RECENT_WINDOW_DAYS = 30;
+const RECENT_LIMIT = 100;
+
+/**
+ * Recently issued prescriptions, across patients.
+ *
+ * WHY THIS PAGE EXISTS
+ * --------------------
+ * Prescriptions are immutable once signed, so the only remedy for a mistake is to cancel
+ * and supersede — and that remedy is worthless if the prescriber cannot find what they
+ * issued. Until now every prescription was reachable only through the chart of the
+ * patient it belongs to, which means noticing an error required already suspecting it.
+ *
+ * SCOPE, AND WHY IT IS DECIDED SERVER-SIDE
+ * ----------------------------------------
+ * Same rule as the unsigned-notes queue: a prescriber sees their own prescribing, an
+ * administrator holding `audit.read` sees the clinic. Doctors are scoped to their own
+ * patients (CLAUDE.md), and one clinician's prescribing history is not another's
+ * business. The caller does not get to ask for a wider slice — `scope` is an OUTPUT.
+ *
+ * WHAT IS DELIBERATELY NOT SELECTED
+ * ---------------------------------
+ * Dose, frequency, quantity, and indication are omitted. A medication name is enough to
+ * recognise the entry you are looking for; the indication is a diagnosis in all but name,
+ * and rendering a hundred of them on one screen turns a worklist into a bulk clinical
+ * disclosure. Opening the patient's chart writes its own per-patient `prescription.read`,
+ * which is where the attributable trail belongs.
+ */
+export async function listRecentPrescriptions(): Promise<RecentPrescriptions> {
+  return auditedSearch(
+    {
+      permission: 'prescription.read',
+      action: 'prescription.search',
+      entityType: 'prescription',
+      metadata: { windowDays: RECENT_WINDOW_DAYS },
+    },
+    async (tx, session): Promise<RecentPrescriptions> => {
+      const clinicWide = session.permissions.has('audit.read');
+      const since = new Date(Date.now() - RECENT_WINDOW_DAYS * 86_400_000);
+
+      const rows = await tx
+        .select({
+          id: prescription.id,
+          patientId: prescription.patientId,
+          legalFirstName: patient.legalFirstName,
+          legalLastName: patient.legalLastName,
+          mrn: patient.mrn,
+          prescriberId: prescription.prescriberUserId,
+          prescriberName: userAccount.fullName,
+          status: prescription.status,
+          issuedAt: prescription.createdAt,
+          cancelledAt: prescription.cancelledAt,
+          supersedesPrescriptionId: prescription.supersedesPrescriptionId,
+        })
+        .from(prescription)
+        .innerJoin(userAccount, eq(userAccount.id, prescription.prescriberUserId))
+        .innerJoin(patient, eq(patient.id, prescription.patientId))
+        .where(
+          and(
+            eq(prescription.clinicId, session.clinicId),
+            gte(prescription.createdAt, since),
+            isNull(prescription.archivedAt),
+            // Scoping in SQL, not post-filtering: an out-of-scope row is never read.
+            clinicWide
+              ? undefined
+              : eq(prescription.prescriberUserId, session.userId),
+          ),
+        )
+        .orderBy(desc(prescription.createdAt))
+        .limit(RECENT_LIMIT);
+
+      /* Medication names in one grouped query rather than N per-row lookups. Cancelled
+         prescriptions keep their lines: withdrawn instructions stay visible, which is the
+         whole point of never editing one. */
+      const ids = rows.map((r) => r.id);
+      const nameByPrescription = new Map<string, string[]>();
+
+      if (ids.length > 0) {
+        const lines = await tx
+          .select({
+            prescriptionId: prescriptionItem.prescriptionId,
+            name: medication.name,
+          })
+          .from(prescriptionItem)
+          .innerJoin(medication, eq(medication.id, prescriptionItem.medicationId))
+          .where(inArray(prescriptionItem.prescriptionId, ids))
+          .orderBy(asc(prescriptionItem.sequence));
+
+        for (const line of lines) {
+          const list = nameByPrescription.get(line.prescriptionId) ?? [];
+          list.push(line.name);
+          nameByPrescription.set(line.prescriptionId, list);
+        }
+      }
+
+      return {
+        scope: clinicWide ? 'clinic' : 'mine',
+        windowDays: RECENT_WINDOW_DAYS,
+        rows: rows.map((r) => ({
+          id: r.id,
+          patientId: r.patientId,
+          patientName: `${r.legalLastName}, ${r.legalFirstName}`,
+          mrn: r.mrn,
+          prescriberName: r.prescriberName,
+          prescribedByMe: r.prescriberId === session.userId,
+          status: r.status as RecentPrescriptionRow['status'],
+          issuedAt: r.issuedAt,
+          cancelledAt: r.cancelledAt,
+          supersedesPrescriptionId: r.supersedesPrescriptionId,
+          medicationNames: nameByPrescription.get(r.id) ?? [],
+        })),
+      };
+    },
+    (result) => ({ resultCount: result.rows.length, labels: { scope: result.scope } }),
   );
 }

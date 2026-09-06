@@ -16,6 +16,7 @@ import { getPatientPrescriptions } from '@/server/data-access/prescriptions';
 
 import { BreakGlassButton } from './BreakGlassButton';
 import { ClinicalFacts } from './ClinicalFacts';
+import { StartNoteButton } from './StartNoteButton';
 
 /**
  * Patient profile.
@@ -90,6 +91,7 @@ export default async function PatientProfilePage({
   const mayReadRx = can(session.permissions, 'prescription.read');
   const mayPrescribe = can(session.permissions, 'prescription.create');
   const mayEditClinical = can(session.permissions, 'patient.update.clinical');
+  const mayWriteNotes = can(session.permissions, 'note.create');
 
   /*
    * The note query is CONDITIONAL on the permission — not fetched-then-hidden.
@@ -332,6 +334,7 @@ export default async function PatientProfilePage({
 
       {mayReadNotes ? (
         <Section title="Visit notes">
+          {mayWriteNotes ? <StartNoteButton patientId={id} /> : null}
           {notes.length === 0 ? (
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
               No visit notes recorded.

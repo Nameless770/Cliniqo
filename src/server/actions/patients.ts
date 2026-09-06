@@ -7,6 +7,7 @@ import {
   archivePatientInput,
   clinicalPatientInput,
   createPatientInput,
+  formFields,
   identifyingPatientInput,
   toFieldErrors,
   unarchivePatientInput,
@@ -64,7 +65,7 @@ export async function createPatientAction(
   _previous: PatientFormState,
   formData: FormData,
 ): Promise<PatientFormState> {
-  const raw = Object.fromEntries(formData.entries());
+  const raw = formFields(formData);
 
   const parsed = createPatientInput.safeParse({
     ...raw,
@@ -133,7 +134,7 @@ export async function updatePatientAction(
     const session = await requireAuthenticated();
     const canWriteClinical = session.permissions.has('patient.update.clinical');
 
-    const raw = Object.fromEntries(formData.entries());
+    const raw = formFields(formData);
     const expectedVersion = Number(raw['version']);
     delete raw['version'];
 
@@ -180,7 +181,7 @@ export async function archivePatientAction(
   _previous: PatientFormState,
   formData: FormData,
 ): Promise<PatientFormState> {
-  const parsed = archivePatientInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = archivePatientInput.safeParse(formFields(formData));
 
   if (!parsed.success) {
     return { errors: toFieldErrors(parsed.error) };
@@ -215,7 +216,7 @@ export async function unarchivePatientAction(
    * "invalid input syntax for type uuid", surfacing as an unhandled 500 instead of a
    * clean rejection. It also skipped the shape check every other mutation performs.
    */
-  const parsed = unarchivePatientInput.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = unarchivePatientInput.safeParse(formFields(formData));
   if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
 
   const { patientId } = parsed.data;

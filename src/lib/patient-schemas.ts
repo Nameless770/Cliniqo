@@ -217,3 +217,32 @@ export function toFieldErrors(error: z.ZodError): FieldErrors {
   }
   return out;
 }
+
+/**
+ * The user-submitted fields of a form, with the framework's own keys removed.
+ *
+ * React's progressive-enhancement encoding for server actions travels in the same
+ * FormData as the user's input: `$ACTION_REF_2`, `$ACTION_2:0`, `$ACTION_KEY` and
+ * friends. They are transport, not input — the user never typed them and no schema
+ * should have an opinion about them.
+ *
+ * WHY THIS EXISTS. Every action here validates with a `.strict()` schema, which is the
+ * right default: it rejects fields nobody declared instead of silently ignoring them,
+ * which is what stops a receptionist's form from smuggling a clinical column. But strict
+ * mode also rejects the framework's keys, producing an `unrecognized_keys` issue with an
+ * EMPTY path — so it lands under `_form`, which no form renders. The observed behaviour
+ * was a "Book appointment" button that did nothing at all: no row, no error, no message.
+ *
+ * Stripping by prefix rather than loosening the schemas keeps the strictness that makes
+ * the field boundary enforceable, and confines the knowledge of React's encoding to one
+ * function. `scripts/security-invariants.mjs` asserts no action parses raw FormData.
+ */
+export function formFields(formData: FormData): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const [key, value] of formData.entries()) {
+    // Covers $ACTION_REF_n, $ACTION_n:m, and $ACTION_KEY in one rule.
+    if (key.startsWith('$ACTION')) continue;
+    fields[key] = value;
+  }
+  return fields;
+}

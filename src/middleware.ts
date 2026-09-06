@@ -39,10 +39,38 @@ export function middleware(request: NextRequest) {
   // 128 bits, base64. Fresh per request — a reused nonce is no nonce.
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
 
+  /*
+   * `'unsafe-eval'` — DEVELOPMENT ONLY, and it must stay that way.
+   *
+   * React's development build calls eval() to rebuild stack traces across the
+   * server/client boundary. Denying it does not make the dev server safer in any
+   * meaningful sense — it runs on loopback with synthetic data — but it does strip the
+   * error reporting, which is how a plain "database is down" surfaced as an opaque
+   * `ERROR 932402932` digest with no message. A control that only degrades diagnostics
+   * is a control that costs debugging time and buys nothing.
+   *
+   * `process.env.NODE_ENV` is inlined by the bundler, so in a production build this is
+   * the literal `false` and the directive is dead-code eliminated — it cannot be turned
+   * on by an environment variable at runtime. Production keeps nonce + strict-dynamic
+   * with no eval, which is the policy that actually matters on a page rendering PHI.
+   */
+  /*
+   * The one raw `process.env` read that is not just permitted but REQUIRED.
+   *
+   * The validated `env` module is server-only and cannot be imported into the Edge
+   * runtime. More importantly, the safety of this line comes precisely from it being a
+   * literal `process.env.NODE_ENV` that the bundler substitutes at build time — reading
+   * the same value through a validated accessor would make it a runtime lookup, and a
+   * runtime lookup is one misconfigured variable away from shipping 'unsafe-eval' to
+   * production. Disabled for this line only, not the file.
+   */
+  // eslint-disable-next-line no-restricted-properties
+  const devEval = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
+
   const csp = [
     "default-src 'self'",
     // No 'unsafe-inline'. Next applies this nonce to its own bootstrap scripts.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${devEval}`,
     // Retained: inline style ATTRIBUTES cannot be nonced, and are used throughout.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
@@ -64,6 +92,19 @@ export function middleware(request: NextRequest) {
   // Next reads the nonce back off the request header to stamp its inline scripts.
   const headers = new Headers(request.headers);
   headers.set('x-nonce', nonce);
+
+  /*
+   * The current path, for the `(staff)` layout.
+   *
+   * A layout receives no pathname in the App Router, and the forced-password-change
+   * redirect has to know whether it is already ON the password page or it loops forever.
+   * This is a REQUEST header set by our own middleware, so it is not attacker-controlled
+   * the way an inbound header would be — `new Headers(request.headers)` then `.set()`
+   * overwrites any value a client tried to send under the same name.
+   *
+   * Still not access control: it decides where to send someone, never what they may read.
+   */
+  headers.set('x-pathname', request.nextUrl.pathname);
 
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('Content-Security-Policy', csp);
