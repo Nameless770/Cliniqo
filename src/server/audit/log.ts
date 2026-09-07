@@ -38,6 +38,8 @@ export type AuditEntityType =
   | 'user_account'
   | 'user_role'
   | 'session'
+  | 'patient_account'
+  | 'patient_session'
   | 'clinic'
   | 'break_glass_grant'
   | 'audit_event';
@@ -45,6 +47,8 @@ export type AuditEntityType =
 export type AuditInput = {
   clinicId: string;
   actorUserId?: string | null;
+  /** Set instead of actorUserId when the action came from a patient via the portal. */
+  actorPatientAccountId?: string | null;
   /** Roles held AT THIS MOMENT. A snapshot, because grants change and the log must not lie. */
   actorRoleCodes?: string[] | null;
   actorIp?: string | null;
@@ -86,6 +90,7 @@ export async function writeAuditEvent(tx: Tx, input: AuditInput): Promise<void> 
     occurredAt: new Date(),
     clinicId: input.clinicId,
     actorUserId: input.actorUserId ?? null,
+    actorPatientAccountId: input.actorPatientAccountId ?? null,
     actorRoleCodes: input.actorRoleCodes ?? null,
     actorIp: input.actorIp ?? null,
     actorUserAgent: input.actorUserAgent ?? null,

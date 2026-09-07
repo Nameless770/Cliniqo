@@ -41,6 +41,12 @@ h4 {
   line-height: var(--leading-tight);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
+  /* Notion tracks large type tighter — headings read as one confident mark. */
+  letter-spacing: var(--tracking-snug);
+}
+
+h1 {
+  letter-spacing: var(--tracking-tight);
 }
 
 p {

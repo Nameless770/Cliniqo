@@ -27,6 +27,7 @@ import { clinic } from './clinic';
 import { auditEntityType, auditOutcome, breakGlassReviewOutcome } from './enums';
 import { userAccount } from './identity';
 import { patient } from './patient';
+import { patientAccount } from './portal';
 import { primaryId, timestamps } from './shared';
 
 /* -------------------------------------------------------------------------- */
@@ -95,6 +96,16 @@ export const auditEvent = pgTable(
 
     // --- Actor dimension: strong FK plus a point-in-time snapshot ------------
     actorUserId: uuid('actor_user_id').references(() => userAccount.id),
+
+    /**
+     * The patient who took the action, when it came through the patient portal rather than
+     * from staff. Exactly one of actor_user_id / actor_patient_account_id is set. A patient
+     * booking their own appointment is still a write to a patient record and is audited
+     * like any other — this is how "who booked this" stays answerable for self-service.
+     */
+    actorPatientAccountId: uuid('actor_patient_account_id').references(
+      () => patientAccount.id,
+    ),
 
     /**
      * The roles the actor actually held at this moment.

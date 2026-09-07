@@ -1,5 +1,7 @@
 'use server';
 
+import { z } from 'zod';
+
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
@@ -233,6 +235,58 @@ export async function unarchivePatientAction(
     revalidatePath('/patients');
     revalidatePath(`/patients/${patientId}`);
     return { ok: true, message: 'Patient restored.' };
+  } catch (error) {
+    const authz = authzMessage(error);
+    if (authz) return authz;
+    throw error;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Patient portal invitation                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type InviteFormState = {
+  message?: string;
+  ok?: boolean;
+  /** The claim path, shown once for staff to hand to the patient. */
+  claimPath?: string;
+};
+
+/**
+ * Invite a patient to the self-service portal.
+ *
+ * Gated inside `invitePatient` on `patient.update` (front desk), which also writes the
+ * `patient.portal_invite` audit row. The raw token is returned ONCE and rendered as a
+ * claim link for staff to give the patient; only its hash is stored, exactly like a staff
+ * setup token.
+ */
+export async function invitePatientAction(
+  _previous: InviteFormState,
+  formData: FormData,
+): Promise<InviteFormState> {
+  const parsed = z
+    .object({ patientId: z.uuid() })
+    .safeParse(formFields(formData));
+  if (!parsed.success) return { message: 'Bad request.' };
+
+  const { invitePatient } = await import('@/server/portal/accounts');
+
+  try {
+    const result = await invitePatient(parsed.data.patientId);
+    if (!result.ok) {
+      return {
+        message:
+          result.reason === 'no_email'
+            ? 'This patient has no email on file. Add one before inviting them to the portal.'
+            : 'That patient could not be found.',
+      };
+    }
+    return {
+      ok: true,
+      message: 'Invite created.',
+      claimPath: `/portal/claim/${result.token}`,
+    };
   } catch (error) {
     const authz = authzMessage(error);
     if (authz) return authz;

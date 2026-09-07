@@ -33,6 +33,8 @@ export const AUDIT_ACTIONS = [
   'patient.archive',
   /* A full-record disclosure to the patient (§164.524). */
   'patient.export',
+  /* Staff invited the patient to the self-service portal. */
+  'patient.portal_invite',
 
   'allergy.read',
   'allergy.create',
@@ -72,6 +74,8 @@ export const AUDIT_ACTIONS = [
   /* Producing a §164.528 accounting for a patient. */
   'disclosure.accounting',
   'clinic.configure',
+  /* Provider availability and schedule exceptions — clinic scheduling config, not PHI. */
+  'schedule.configure',
   /* Non-PHI reference data: staff names, appointment types, clinic config. */
   'reference.read',
 
@@ -96,6 +100,7 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'patient.update',
   'patient.archive',
   'patient.export',
+  'patient.portal_invite',
   'allergy.read',
   'allergy.create',
   'allergy.update',

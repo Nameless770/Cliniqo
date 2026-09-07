@@ -1,71 +1,83 @@
 /*
- * Cliniqo design tokens
- * =====================
+ * Cliniqo design tokens — Notion-inspired refresh
+ * ================================================
  *
- * Original identity. The palette is built around a deep pine-teal rather than the
- * default SaaS blue or the pale "hospital blue" every EHR reaches for — it reads as
- * clinical without reading as cold, and it is distinct enough that a screenshot is
- * recognisably Cliniqo.
+ * The visual language adopts Notion's product aesthetic: a signature purple primary
+ * ("iris"), warm off-white surfaces over pure grey, a warm-charcoal ink, hairline
+ * borders, 8px buttons and 12px cards, and a set of pastel accent tints echoing the
+ * colourful database properties of that product. Applied to Cliniqo's own surfaces — the
+ * language, not the brand.
  *
- * Three rules this file follows:
+ * Rules this file still follows, unchanged from before, because they are not stylistic:
  *
- * 1. Neutrals are WARM (a touch of yellow-red in the hue). Pure grey plus white is what
- *    makes clinical software feel like a spreadsheet. Staff look at these screens for
- *    eight-hour shifts.
+ * 1. Neutrals are WARM. Pure grey + white reads like a spreadsheet; staff look at these
+ *    screens for eight-hour shifts. Notion's own neutrals are warm for the same reason.
  *
  * 2. Every foreground/background pair used for text meets WCAG AA (4.5:1 body, 3:1 for
- *    large text and UI boundaries) in BOTH themes. Verified by scripts/check-contrast.js,
- *    not by eye.
+ *    large text and UI boundaries) in BOTH themes — verified by scripts/check-contrast.js.
+ *    Where Notion's own hairline borders would fail the 3:1 control boundary, the darker,
+ *    findable border wins: an input edge you cannot see is a control you cannot use.
  *
- * 3. Status is never colour alone. Every status token has a paired icon or text label in
- *    the component that uses it. "Life-threatening allergy" must not depend on the
- *    reader distinguishing red from amber.
+ * 3. Status is never colour alone. Every status token is paired with an icon or a text
+ *    label in the component that uses it.
  */
 
 :root {
   color-scheme: light;
 
   /* ---------------------------------------------------------------- palette */
-  /* Pine — brand primary */
-  --pine-50: #eef6f5;
-  --pine-100: #d5e8e6;
-  --pine-200: #aad2ce;
-  --pine-300: #79b6b1;
-  --pine-400: #4a948f;
-  --pine-500: #2b7873;
-  --pine-600: #1a625d;
-  --pine-700: #144d49;
-  --pine-800: #103c39;
-  --pine-900: #0b2c2a;
+  /* Iris — signature purple primary (Notion's "Get Notion free" purple) */
+  --iris-50: #f1edfc;
+  --iris-100: #e6e0f5; /* Notion lavender tint */
+  --iris-200: #d6c9f4;
+  --iris-300: #b3a4f5;
+  --iris-400: #8a72ed;
+  --iris-500: #6b58e0;
+  --iris-600: #5645d4; /* primary */
+  --iris-700: #4534b3; /* pressed */
+  --iris-800: #3a2a99; /* deep */
+  --iris-900: #2a1d6e;
 
-  /* Warm neutrals */
-  --sand-0: #ffffff;
-  --sand-25: #fbfaf8;
-  --sand-50: #f6f4f1;
-  --sand-100: #edeae5;
-  --sand-200: #ddd9d2;
-  --sand-300: #c2bcb2;
-  --sand-400: #98928a;
-  --sand-500: #736e66;
-  --sand-600: #575350;
-  --sand-700: #423f3c;
-  --sand-800: #2c2a28;
-  --sand-900: #1b1a19;
-  --sand-950: #111010;
+  /* Warm neutrals — Notion's charcoal/stone family */
+  --sand-0: #ffffff; /* canvas */
+  --sand-25: #fafaf9; /* surface-soft */
+  --sand-50: #f6f5f4; /* surface */
+  --sand-100: #f0eeec; /* sunken / neutral tint */
+  --sand-200: #e5e3df; /* hairline */
+  --sand-300: #c8c4be; /* strong hairline */
+  --sand-400: #a4a097; /* stone */
+  --sand-500: #8a867e;
+  --sand-600: #6b6961; /* muted text floor for AA */
+  --sand-700: #565349;
+  --sand-800: #37352f; /* Notion signature warm charcoal */
+  --sand-900: #211f1b; /* warm ink — primary text */
+  --sand-950: #131210;
 
-  /* Functional — deliberately different hues from pine so status never blurs into brand */
-  --success-50: #eaf5ea;
-  --success-600: #2d7233;
-  --success-700: #235a28;
-  --warn-50: #fdf3e6;
-  --warn-600: #96530b;
-  --warn-700: #7a4309;
-  --danger-50: #fdedeb;
-  --danger-600: #b03027;
-  --danger-700: #8e241d;
-  --info-50: #eaf1fd;
-  --info-600: #1f56b8;
-  --info-700: #194593;
+  /* Navy — dark hero/chrome accent and the night-theme ground */
+  --navy-900: #070f24;
+  --navy-800: #0a1530;
+  --navy-700: #101d3d;
+  --navy-600: #1a2a52;
+  --navy-500: #223461;
+
+  /* Link blue — inline links, a DISTINCT role from the purple CTA */
+  --link-blue: #0075de;
+  --link-blue-pressed: #005bab;
+
+  /* Pastel accent tints — feature/status backgrounds */
+  --tint-peach: #ffe8d4;
+  --tint-rose: #fde0ec;
+  --tint-mint: #d9f3e1;
+  --tint-lavender: #e6e0f5;
+  --tint-sky: #dcecfa;
+  --tint-yellow: #fef7d6;
+  --tint-red: #fde4e0;
+
+  /* Functional text shades, dark enough to pass AA on their pale tints */
+  --success-text-l: #176c2b;
+  --warn-text-l: #7a3e00;
+  --danger-text-l: #a5231b;
+  --info-text-l: #005bab;
 
   /* ------------------------------------------------------------- semantic */
   --bg-page: var(--sand-50);
@@ -74,51 +86,53 @@
   --bg-sunken: var(--sand-100);
   --bg-hover: var(--sand-100);
   --bg-active: var(--sand-200);
-  --bg-overlay: rgb(27 26 25 / 55%);
+  --bg-overlay: rgb(10 21 48 / 45%);
 
   --text-primary: var(--sand-900);
-  --text-secondary: var(--sand-600);
-  --text-muted: var(--sand-500);
+  --text-secondary: var(--sand-700);
+  --text-muted: var(--sand-600);
   --text-inverse: var(--sand-0);
-  --text-brand: var(--pine-700);
+  --text-brand: var(--iris-600);
 
   /* subtle = decorative rules and dividers; no contrast minimum applies */
   --border-subtle: var(--sand-200);
-  /* default = the visible edge of an input or control. WCAG 1.4.11 requires 3:1, so
-     this is a step darker than it "looks nice" at — a border you cannot find is a
+  /* default = the visible edge of an input or control. WCAG 1.4.11 requires 3:1, so this
+     is deliberately darker than Notion's own hairline — a border you cannot find is a
      control you cannot find. */
-  --border-default: var(--sand-400);
-  --border-strong: var(--sand-500);
+  --border-default: var(--sand-500);
+  --border-strong: var(--sand-600);
 
-  --brand-solid: var(--pine-600);
-  --brand-solid-hover: var(--pine-700);
-  --brand-solid-active: var(--pine-800);
-  --brand-soft: var(--pine-50);
+  --brand-solid: var(--iris-600);
+  --brand-solid-hover: var(--iris-700);
+  --brand-solid-active: var(--iris-800);
+  --brand-soft: var(--iris-50);
   --brand-text-on-solid: var(--sand-0);
 
-  --status-success-text: var(--success-700);
-  --status-success-bg: var(--success-50);
-  --status-warn-text: var(--warn-700);
-  --status-warn-bg: var(--warn-50);
-  --status-danger-text: var(--danger-700);
-  --status-danger-bg: var(--danger-50);
-  --status-info-text: var(--info-700);
-  --status-info-bg: var(--info-50);
+  --status-success-text: var(--success-text-l);
+  --status-success-bg: var(--tint-mint);
+  --status-warn-text: var(--warn-text-l);
+  --status-warn-bg: var(--tint-peach);
+  --status-danger-text: var(--danger-text-l);
+  --status-danger-bg: var(--tint-red);
+  --status-info-text: var(--info-text-l);
+  --status-info-bg: var(--tint-sky);
 
-  --focus-ring: var(--pine-500);
+  --focus-ring: var(--iris-600);
   --focus-ring-offset: var(--bg-surface);
 
   /* ---------------------------------------------------------- typography */
   /*
-   * System fonts, no webfont.
+   * Inter-fronted system stack — no webfont.
    *
-   * Not a performance choice: loading a font from a third-party CDN means every page
-   * that renders a patient chart also makes a request to a vendor with no BAA. Self-
-   * hosting would be acceptable; system fonts make the question moot.
+   * Notion ships a custom Inter-based face; we front the stack with Inter so it is used
+   * where installed, then fall back to the platform UI sans. Loading a font from a
+   * third-party CDN would mean every page rendering a patient chart also calls a vendor
+   * with no BAA, so nothing is fetched — the humanist-geometric character comes from
+   * Inter or the system UI font, whichever the machine already has.
    */
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
+    'Inter', 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
   --font-mono:
     ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'SF Mono', Menlo, Consolas, monospace;
 
@@ -131,7 +145,12 @@
   --text-xl: 1.375rem;
   --text-2xl: 1.75rem;
 
-  --leading-tight: 1.25;
+  /* Notion tracks large type tighter and body slightly open. */
+  --tracking-tight: -0.02em;
+  --tracking-snug: -0.01em;
+  --tracking-normal: 0;
+
+  --leading-tight: 1.2;
   --leading-normal: 1.5;
   --leading-relaxed: 1.65; /* note bodies — long-form clinical text */
 
@@ -154,14 +173,17 @@
   --space-16: 4rem;
 
   /* --------------------------------------------------------------- shape */
-  --radius-sm: 3px;
-  --radius-md: 5px;
-  --radius-lg: 8px;
+  /* Notion geometry: 8px buttons/inputs, 12px cards, full only for pills/badges. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 999px;
 
-  --shadow-sm: 0 1px 2px rgb(27 26 25 / 6%);
-  --shadow-md: 0 2px 4px rgb(27 26 25 / 8%), 0 1px 2px rgb(27 26 25 / 5%);
-  --shadow-lg: 0 8px 24px rgb(27 26 25 / 12%), 0 2px 6px rgb(27 26 25 / 6%);
+  /* Soft, diffuse elevation in Notion's grey-ink rather than pure black. */
+  --shadow-sm: 0 1px 2px rgb(15 15 15 / 6%);
+  --shadow-md: 0 4px 12px rgb(15 15 15 / 8%);
+  --shadow-lg: 0 24px 48px -8px rgb(15 15 15 / 18%), 0 2px 6px rgb(15 15 15 / 6%);
 
   /* --------------------------------------------------------------- other */
   --shell-topbar-height: 3.25rem;
@@ -180,51 +202,52 @@
 /*
  * Dark theme.
  *
- * Night shifts are real in clinical work. Only the semantic layer flips — the palette
- * scales stay put — so a component never needs to know which theme it is in.
+ * The night ground takes Notion's deep navy rather than a neutral black, so a shift
+ * worked after dark still reads as the same brand. Only the semantic layer flips; the
+ * palette scales stay put, so a component never needs to know which theme it is in.
  */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --bg-page: var(--sand-950);
-    --bg-surface: #1a1918;
-    --bg-raised: #232120;
-    --bg-sunken: #131211;
-    --bg-hover: #2a2827;
-    --bg-active: #333130;
-    --bg-overlay: rgb(0 0 0 / 65%);
+    --bg-page: var(--navy-900);
+    --bg-surface: var(--navy-800);
+    --bg-raised: var(--navy-700);
+    --bg-sunken: #060c1d;
+    --bg-hover: var(--navy-700);
+    --bg-active: var(--navy-600);
+    --bg-overlay: rgb(3 7 18 / 70%);
 
     --text-primary: var(--sand-50);
     --text-secondary: var(--sand-300);
     --text-muted: var(--sand-400);
-    --text-inverse: var(--sand-950);
-    --text-brand: var(--pine-200);
+    --text-inverse: var(--navy-900);
+    --text-brand: var(--iris-300);
 
-    --border-subtle: #302e2c;
-    --border-default: #6b6763;
-    --border-strong: #7d7975;
+    --border-subtle: #1c2a49;
+    --border-default: #5b6a8a;
+    --border-strong: #74829e;
 
-    --brand-solid: var(--pine-400);
-    --brand-solid-hover: var(--pine-300);
-    --brand-solid-active: var(--pine-200);
-    --brand-soft: #16302e;
-    --brand-text-on-solid: var(--sand-950);
+    --brand-solid: var(--iris-500);
+    --brand-solid-hover: var(--iris-400);
+    --brand-solid-active: var(--iris-300);
+    --brand-soft: #1c1d4a;
+    --brand-text-on-solid: #ffffff;
 
     --status-success-text: #7fc785;
-    --status-success-bg: #16281a;
+    --status-success-bg: #10251a;
     --status-warn-text: #e0a95f;
-    --status-warn-bg: #2c1e0a;
+    --status-warn-bg: #2a1c0b;
     --status-danger-text: #f2938a;
-    --status-danger-bg: #2e1512;
-    --status-info-text: #92b4f4;
-    --status-info-bg: #131f36;
+    --status-danger-bg: #2c1513;
+    --status-info-text: #7cb0f5;
+    --status-info-bg: #0f1f3d;
 
-    --focus-ring: var(--pine-300);
+    --focus-ring: var(--iris-400);
     --focus-ring-offset: var(--bg-surface);
 
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-    --shadow-md: 0 2px 4px rgb(0 0 0 / 45%), 0 1px 2px rgb(0 0 0 / 30%);
-    --shadow-lg: 0 8px 24px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 35%);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 45%);
+    --shadow-md: 0 4px 12px rgb(0 0 0 / 50%);
+    --shadow-lg: 0 24px 48px -8px rgb(0 0 0 / 60%), 0 2px 6px rgb(0 0 0 / 40%);
   }
 }

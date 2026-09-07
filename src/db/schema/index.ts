@@ -10,6 +10,7 @@ export * from './shared';
 
 export * from './clinic';
 export * from './identity';
+export * from './portal';
 export * from './patient';
 export * from './scheduling';
 export * from './clinical';

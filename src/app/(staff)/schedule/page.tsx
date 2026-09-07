@@ -120,21 +120,48 @@ export default async function SchedulePage({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      <div>
-        <h1 style={{ fontSize: 'var(--text-xl)', marginBottom: 'var(--space-1)' }}>
-          Schedule
-        </h1>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 'var(--text-sm)',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          {entries.length} appointment{entries.length === 1 ? '' : 's'}
-          {providerFilter && !input.providerUserId ? ' · your list' : ''} · times shown in{' '}
-          {timeZone}
-        </p>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 'var(--space-4)',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 'var(--text-xl)', marginBottom: 'var(--space-1)' }}>
+            Schedule
+          </h1>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            {entries.length} appointment{entries.length === 1 ? '' : 's'}
+            {providerFilter && !input.providerUserId ? ' · your list' : ''} · times shown in{' '}
+            {timeZone}
+          </p>
+        </div>
+        {mayReschedule ? (
+          <Link
+            href="/schedule/availability"
+            style={{
+              padding: 'var(--space-2) var(--space-4)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-default)',
+              background: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              textDecoration: 'none',
+              fontSize: 'var(--text-sm)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Manage availability
+          </Link>
+        ) : null}
       </div>
 
       <nav

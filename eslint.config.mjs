@@ -139,7 +139,12 @@ export default tseslint.config(
   /* ---------------------------------------------------------------------- */
   {
     files: ['src/server/**/*.ts', 'src/app/**/*.{ts,tsx}'],
-    ignores: ['src/server/data-access/**'],
+    // The patient portal (src/server/portal) is a SECOND audited surface: it reads and
+    // writes patient tables directly, but every PHI access there writes its own audit row
+    // (auditAsPatient), and the staff-facing invite goes through the audited layer proper.
+    // A patient acting on their own record is the one caller with no staff permission, so
+    // it cannot use the staff audited layer — hence a parallel, self-auditing surface.
+    ignores: ['src/server/data-access/**', 'src/server/portal/**'],
     rules: {
       'no-restricted-imports': [
         'error',

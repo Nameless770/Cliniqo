@@ -398,8 +398,26 @@ for (const t of ['patient', 'visitNote', 'prescription', 'appointment']) {
 check(
   'Boundaries',
   'data-access exempted from the PHI import ban',
-  /ignores: \['src\/server\/data-access\/\*\*'\]/.test(eslintCfg),
+  /ignores: \[[^\]]*'src\/server\/data-access\/\*\*'/.test(eslintCfg),
 );
+/*
+ * The patient portal is a SECOND surface allowed to touch patient tables directly. That is
+ * a deliberate loosening — a patient acting on their own record has no staff permission and
+ * cannot use the staff audited layer — so it must pay for itself: every PHI access in the
+ * portal writes its own audit row. This asserts that self-auditing exists, so the exemption
+ * cannot quietly become an unaudited hole.
+ */
+{
+  const portalExempted = /'src\/server\/portal\/\*\*'/.test(eslintCfg);
+  const portalData = read('src/server/portal/data.ts');
+  check(
+    'Boundaries',
+    'if the portal is exempted, its PHI access is self-audited',
+    !portalExempted ||
+      (portalData.includes('auditAsPatient') &&
+        portalData.includes('actorPatientAccountId')),
+  );
+}
 check(
   'Boundaries',
   'components cannot import server internals',
@@ -575,7 +593,8 @@ for (const file of readdirSync(actionDir).filter((f) => f.endsWith('.ts'))) {
   const exported = (src.match(/^export async function/gm) ?? []).length;
   const parsed = (src.match(/safeParse/g) ?? []).length;
   // logout and submitNoteAction take no validatable input / delegate.
-  const exempt = { 'auth.ts': 1, 'notes.ts': 1 }[file] ?? 0;
+  // logout / submitNoteAction / portal logout take no validatable input, or delegate.
+  const exempt = { 'auth.ts': 1, 'notes.ts': 1, 'portal.ts': 1 }[file] ?? 0;
   check(
     'Validation',
     `${file}: every input-taking action validates`,

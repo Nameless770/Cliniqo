@@ -17,6 +17,7 @@ import { getPatientPrescriptions } from '@/server/data-access/prescriptions';
 import { BreakGlassButton } from './BreakGlassButton';
 import { ClinicalFacts } from './ClinicalFacts';
 import { ArchiveControls } from './ArchiveControls';
+import { InvitePatientButton } from './InvitePatientButton';
 import { PrescriptionActions } from './PrescriptionActions';
 import { StartNoteButton } from './StartNoteButton';
 
@@ -635,24 +636,27 @@ export default async function PatientProfilePage({
         deleted (CLAUDE.md rule 4). Only shown to holders of `patient.archive`, and only
         when the record is still active.
       */}
-      {mayArchive && !p.archivedAt ? (
+      {(mayArchive || mayEdit) && !p.archivedAt ? (
         <section
           style={{
             marginTop: 'var(--space-4)',
             paddingTop: 'var(--space-4)',
             borderTop: '1px solid var(--border-subtle)',
+            display: 'grid',
+            gap: 'var(--space-4)',
           }}
         >
           <h2
             style={{
               fontSize: 'var(--text-sm)',
               color: 'var(--text-secondary)',
-              margin: '0 0 var(--space-2)',
+              margin: 0,
             }}
           >
             Administration
           </h2>
-          <ArchiveControls patientId={id} archived={false} />
+          {mayEdit ? <InvitePatientButton patientId={id} /> : null}
+          {mayArchive ? <ArchiveControls patientId={id} archived={false} /> : null}
         </section>
       ) : null}
     </div>
