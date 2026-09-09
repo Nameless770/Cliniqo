@@ -40,4 +40,15 @@ export const portalBookInput = z
   })
   .strict();
 
+export const portalCancelInput = z.object({ appointmentId: z.uuid() }).strict();
+
+export const portalRescheduleInput = z
+  .object({
+    appointmentId: z.uuid(),
+    startsAt: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/, 'Choose a new date and time.'),
+  })
+  .strict();
+
 export type PortalBookInputParsed = z.infer<typeof portalBookInput>;

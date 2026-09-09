@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { getSession } from '@/server/auth/session';
@@ -45,6 +46,24 @@ export default async function LoginPage() {
       >
         Accounts are issued by a clinic administrator. If you cannot sign in, contact them
         directly — there is no self-service password reset.
+      </p>
+
+      {/*
+        The way in for patients. Without it the portal is unreachable except by pasting a
+        URL — the invite link is emailed once and then gone, so a patient coming back a
+        month later would land here with nowhere to go.
+      */}
+      <p
+        style={{
+          marginTop: 'var(--space-5)',
+          paddingTop: 'var(--space-5)',
+          borderTop: '1px solid var(--border-subtle)',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        Are you a patient?{' '}
+        <Link href="/portal/login">Sign in to see and book your appointments</Link>.
       </p>
     </section>
   );

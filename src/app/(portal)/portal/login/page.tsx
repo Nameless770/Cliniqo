@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { getPatientSession } from '@/server/portal/session';
@@ -23,6 +24,18 @@ export default async function PortalLoginPage() {
         </p>
       </div>
       <PortalLoginForm />
+
+      <p
+        style={{
+          marginTop: 'var(--space-2)',
+          paddingTop: 'var(--space-5)',
+          borderTop: '1px solid var(--border-subtle)',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        Clinic staff? <Link href="/login">Sign in here</Link>.
+      </p>
     </div>
   );
 }

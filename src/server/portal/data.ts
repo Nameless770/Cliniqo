@@ -16,6 +16,7 @@ import {
 import type { Tx } from '@/server/audit/log';
 import { writeAuditEvent, type AuditInput } from '@/server/audit/log';
 import { requestMeta, safeInet } from '@/server/auth/session';
+import { canTransition, type AppointmentStatus } from '@/lib/appointment-schemas';
 import { zonedWallClock } from '@/lib/clinic-time';
 import { isSlotContention } from '@/lib/pg-errors';
 
@@ -212,6 +213,126 @@ const toMinutes = (hms: string): number => {
   return Number(h) * 60 + Number(m);
 };
 
+export type SlotDenial =
+  | 'invalid_time'
+  | 'past'
+  | 'outside_hours'
+  | 'unavailable'
+  | 'unknown_provider';
+
+type SlotCheck = { ok: true; range: string } | { ok: false; reason: SlotDenial };
+
+/**
+ * Every rule deciding whether a patient may take a given slot, in one place.
+ *
+ * Shared by booking and rescheduling deliberately. A reschedule is a booking that happens
+ * to reuse a row, and if the two checks drifted apart, "move it" would quietly become the
+ * loophole that puts an appointment where "make it" refuses to — the closed Tuesday, the
+ * doctor on leave, the hour outside published availability.
+ *
+ * `durationMinutes` is passed in from the appointment TYPE, never from the request. A
+ * client that could name its own duration could book a one-minute slot to slip inside a
+ * gap the clinic never offered.
+ */
+async function checkSlot(
+  tx: Tx,
+  session: PatientSession,
+  args: { providerUserId: string; durationMinutes: number; startsAt: string },
+): Promise<SlotCheck> {
+  const start = zonedWallClock(args.startsAt, session.clinicTimeZone);
+  if (Number.isNaN(start.getTime())) return { ok: false, reason: 'invalid_time' };
+  if (start.getTime() <= Date.now()) return { ok: false, reason: 'past' };
+
+  // Local wall-clock parts, straight from the submitted string (it is clinic-local).
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(args.startsAt);
+  if (!m) return { ok: false, reason: 'invalid_time' };
+  const dayOfWeek = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`).getUTCDay();
+  const startMinutes = Number(m[4]) * 60 + Number(m[5]);
+  const endMinutes = startMinutes + args.durationMinutes;
+
+  const [provider] = await tx
+    .select({ id: userAccount.id })
+    .from(userAccount)
+    .innerJoin(userRole, eq(userRole.userId, userAccount.id))
+    .innerJoin(role, eq(role.id, userRole.roleId))
+    .where(
+      and(
+        eq(userAccount.id, args.providerUserId),
+        eq(userAccount.clinicId, session.clinicId),
+        eq(userAccount.status, 'active'),
+        isNull(userAccount.archivedAt),
+        isNull(userRole.revokedAt),
+        eq(role.code, 'doctor'),
+      ),
+    )
+    .limit(1);
+  if (!provider) return { ok: false, reason: 'unknown_provider' };
+
+  // Must sit entirely within one opening-hours window for that weekday.
+  const windows = await tx
+    .select({ opensAt: clinicHours.opensAt, closesAt: clinicHours.closesAt })
+    .from(clinicHours)
+    .where(
+      and(eq(clinicHours.clinicId, session.clinicId), eq(clinicHours.dayOfWeek, dayOfWeek)),
+    );
+  const withinHours = windows.some(
+    (w) => toMinutes(w.opensAt) <= startMinutes && endMinutes <= toMinutes(w.closesAt),
+  );
+  if (!withinHours) return { ok: false, reason: 'outside_hours' };
+
+  const end = new Date(start.getTime() + args.durationMinutes * 60_000);
+  const range = `[${start.toISOString()},${end.toISOString()})`;
+
+  /*
+   * A closure or the provider's time off blocks the slot.
+   * NULL provider = clinic-wide closure; a matching provider = their own time off.
+   */
+  const blocked = await tx
+    .select({ id: scheduleException.id })
+    .from(scheduleException)
+    .where(
+      and(
+        eq(scheduleException.clinicId, session.clinicId),
+        sql`${scheduleException.during} && ${range}::tstzrange`,
+        or(
+          isNull(scheduleException.providerUserId),
+          eq(scheduleException.providerUserId, args.providerUserId),
+        )!,
+      ),
+    )
+    .limit(1);
+  if (blocked.length > 0) return { ok: false, reason: 'unavailable' };
+
+  /*
+   * Provider availability. If this provider publishes weekly hours, a patient may only
+   * book WITHIN them; if they publish none, clinic hours above are the only gate. Staff
+   * are deliberately not held to this — they can squeeze a patient in — but a patient
+   * self-serving may only take an advertised slot.
+   */
+  const avail = await tx
+    .select({
+      dayOfWeek: providerAvailability.dayOfWeek,
+      startsAt: providerAvailability.startsAt,
+      endsAt: providerAvailability.endsAt,
+    })
+    .from(providerAvailability)
+    .where(
+      and(
+        eq(providerAvailability.clinicId, session.clinicId),
+        eq(providerAvailability.providerUserId, args.providerUserId),
+      ),
+    );
+  if (avail.length > 0) {
+    const forDay = avail.filter((a) => a.dayOfWeek === dayOfWeek);
+    const withinAvail = forDay.some(
+      (a) => toMinutes(a.startsAt) <= startMinutes && endMinutes <= toMinutes(a.endsAt),
+    );
+    if (!withinAvail) return { ok: false, reason: 'unavailable' };
+  }
+
+  return { ok: true, range };
+}
+
 /**
  * The patient books their own appointment.
  *
@@ -228,16 +349,6 @@ export async function bookMyAppointment(
   const session = await requirePatientSession();
   const db = getDb();
 
-  const start = zonedWallClock(input.startsAt, session.clinicTimeZone);
-  if (Number.isNaN(start.getTime())) return { ok: false, reason: 'invalid_time' };
-  if (start.getTime() <= Date.now()) return { ok: false, reason: 'past' };
-
-  // Local wall-clock parts, straight from the submitted string (it is clinic-local).
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(input.startsAt);
-  if (!m) return { ok: false, reason: 'invalid_time' };
-  const dayOfWeek = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`).getUTCDay();
-  const startMinutes = Number(m[4]) * 60 + Number(m[5]);
-
   try {
     return await db.transaction(async (tx): Promise<PortalBookResult> => {
       const [type] = await tx
@@ -253,91 +364,12 @@ export async function bookMyAppointment(
         .limit(1);
       if (!type) return { ok: false, reason: 'unknown_type' };
 
-      const [provider] = await tx
-        .select({ id: userAccount.id })
-        .from(userAccount)
-        .innerJoin(userRole, eq(userRole.userId, userAccount.id))
-        .innerJoin(role, eq(role.id, userRole.roleId))
-        .where(
-          and(
-            eq(userAccount.id, input.providerUserId),
-            eq(userAccount.clinicId, session.clinicId),
-            eq(userAccount.status, 'active'),
-            isNull(userAccount.archivedAt),
-            isNull(userRole.revokedAt),
-            eq(role.code, 'doctor'),
-          ),
-        )
-        .limit(1);
-      if (!provider) return { ok: false, reason: 'unknown_provider' };
-
-      const endMinutes = startMinutes + type.duration;
-
-      // Must sit entirely within one opening-hours window for that weekday.
-      const windows = await tx
-        .select({ opensAt: clinicHours.opensAt, closesAt: clinicHours.closesAt })
-        .from(clinicHours)
-        .where(
-          and(
-            eq(clinicHours.clinicId, session.clinicId),
-            eq(clinicHours.dayOfWeek, dayOfWeek),
-          ),
-        );
-      const withinHours = windows.some(
-        (w) => toMinutes(w.opensAt) <= startMinutes && endMinutes <= toMinutes(w.closesAt),
-      );
-      if (!withinHours) return { ok: false, reason: 'outside_hours' };
-
-      const end = new Date(start.getTime() + type.duration * 60_000);
-      const range = `[${start.toISOString()},${end.toISOString()})`;
-
-      /*
-       * A closure or the provider's time off blocks the slot. Staff booking already checks
-       * this; the portal did not, so a patient could have booked a doctor who was away.
-       * NULL provider = clinic-wide closure; a matching provider = their own time off.
-       */
-      const blocked = await tx
-        .select({ id: scheduleException.id })
-        .from(scheduleException)
-        .where(
-          and(
-            eq(scheduleException.clinicId, session.clinicId),
-            sql`${scheduleException.during} && ${range}::tstzrange`,
-            or(
-              isNull(scheduleException.providerUserId),
-              eq(scheduleException.providerUserId, input.providerUserId),
-            )!,
-          ),
-        )
-        .limit(1);
-      if (blocked.length > 0) return { ok: false, reason: 'unavailable' };
-
-      /*
-       * Provider availability. If this provider publishes weekly hours, a patient may only
-       * book WITHIN them; if they publish none, clinic hours above are the only gate. Staff
-       * are deliberately not held to this — they can squeeze a patient in — but a patient
-       * self-serving may only take an advertised slot.
-       */
-      const avail = await tx
-        .select({
-          dayOfWeek: providerAvailability.dayOfWeek,
-          startsAt: providerAvailability.startsAt,
-          endsAt: providerAvailability.endsAt,
-        })
-        .from(providerAvailability)
-        .where(
-          and(
-            eq(providerAvailability.clinicId, session.clinicId),
-            eq(providerAvailability.providerUserId, input.providerUserId),
-          ),
-        );
-      if (avail.length > 0) {
-        const forDay = avail.filter((a) => a.dayOfWeek === dayOfWeek);
-        const withinAvail = forDay.some(
-          (a) => toMinutes(a.startsAt) <= startMinutes && endMinutes <= toMinutes(a.endsAt),
-        );
-        if (!withinAvail) return { ok: false, reason: 'unavailable' };
-      }
+      const slot = await checkSlot(tx, session, {
+        providerUserId: input.providerUserId,
+        durationMinutes: type.duration,
+        startsAt: input.startsAt,
+      });
+      if (!slot.ok) return { ok: false, reason: slot.reason };
 
       const [row] = await tx
         .insert(appointment)
@@ -346,7 +378,7 @@ export async function bookMyAppointment(
           patientId: session.patientId,
           providerUserId: input.providerUserId,
           appointmentTypeId: input.appointmentTypeId,
-          during: range,
+          during: slot.range,
           // Booked by the patient; there is no staff creator.
           createdBy: null,
           bookingNote: 'Booked online by patient',
@@ -363,6 +395,204 @@ export async function bookMyAppointment(
       });
 
       return { ok: true, appointmentId: row!.id };
+    });
+  } catch (error) {
+    if (isSlotContention(error)) return { ok: false, reason: 'slot_taken' };
+    throw error;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Changing an appointment you already have                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a patient may do to their own booking, and when.
+ *
+ * Narrower than the staff rule on purpose. `ALLOWED_TRANSITIONS` lets a CHECKED-IN
+ * appointment be cancelled — correct for a receptionist, wrong for self-service: someone
+ * already standing in the waiting room cancelling from their phone leaves the front desk
+ * with a patient present and no appointment. So self-service additionally requires the
+ * appointment to still be `scheduled` and still be in the future; anything else is a phone
+ * call to the clinic, which is also the honest answer for a late cancellation.
+ */
+type SelfServiceCheck =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'too_late' | 'not_changeable' };
+
+function assessSelfService(
+  existing: { status: string; startsAt: Date | null } | undefined,
+): SelfServiceCheck {
+  if (!existing) return { ok: false, reason: 'not_found' };
+
+  const status = existing.status as AppointmentStatus;
+  if (status !== 'scheduled' || !canTransition(status, 'cancelled')) {
+    return { ok: false, reason: 'not_changeable' };
+  }
+  if (!existing.startsAt || existing.startsAt.getTime() <= Date.now()) {
+    return { ok: false, reason: 'too_late' };
+  }
+  return { ok: true };
+}
+
+export type PortalCancelResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'too_late' | 'not_changeable' };
+
+/**
+ * The patient cancels their own appointment.
+ *
+ * `cancelled_by` stays NULL. It is a foreign key to `user_account`, and writing some staff
+ * id into it to satisfy the column would be a false record of who cancelled — precisely
+ * what an audit exists to catch. The truthful attribution lives in the audit row, whose
+ * actor is the patient account, exactly as it is for portal booking.
+ *
+ * Nothing is deleted: `cancelled` is a status, and the row and its history stay.
+ */
+export async function cancelMyAppointment(
+  appointmentId: string,
+): Promise<PortalCancelResult> {
+  const session = await requirePatientSession();
+  const db = getDb();
+
+  return db.transaction(async (tx): Promise<PortalCancelResult> => {
+    const [existing] = await tx
+      .select({ status: appointment.status, startsAt: appointment.startsAt })
+      .from(appointment)
+      .where(
+        and(
+          // The whole authority check: it must be THIS patient's appointment.
+          eq(appointment.id, appointmentId),
+          eq(appointment.patientId, session.patientId),
+          eq(appointment.clinicId, session.clinicId),
+          isNull(appointment.archivedAt),
+        ),
+      )
+      .limit(1);
+
+    const verdict = assessSelfService(existing);
+    if (!verdict.ok) {
+      /*
+       * Denials are audited too. A patient poking at an id that is not theirs is exactly
+       * the access attempt §164.312(b) exists to record, and from the server it is
+       * indistinguishable from a stale tab — which is why it is logged, not judged.
+       */
+      await auditAsPatient(tx, session, {
+        action: 'appointment.cancel',
+        outcome: 'denied',
+        subjectPatientId: session.patientId,
+        entityType: 'appointment',
+        entityId: appointmentId,
+        metadata: { via: 'portal', reason: verdict.reason },
+      });
+      return verdict;
+    }
+
+    await tx
+      .update(appointment)
+      .set({
+        status: 'cancelled',
+        cancelledAt: new Date(),
+        cancelledBy: null,
+        cancellationReason: 'Cancelled online by patient',
+        version: sql`${appointment.version} + 1`,
+      })
+      .where(eq(appointment.id, appointmentId));
+
+    await auditAsPatient(tx, session, {
+      action: 'appointment.cancel',
+      outcome: 'allowed',
+      subjectPatientId: session.patientId,
+      entityType: 'appointment',
+      entityId: appointmentId,
+      metadata: { via: 'portal' },
+    });
+
+    return { ok: true };
+  });
+}
+
+export type PortalRescheduleResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'not_found' | 'too_late' | 'not_changeable' | 'slot_taken' | SlotDenial;
+    };
+
+/**
+ * The patient moves their own appointment to a different time.
+ *
+ * The clinician and the visit type are NOT re-chosen here — moving an appointment and
+ * changing what it is for are different requests, and the second one belongs with the
+ * clinic. The duration is re-read from the appointment type rather than carried over, so
+ * a type whose length has since changed moves to the current one.
+ *
+ * The new time goes through `checkSlot`, the same gate as booking, and the GiST exclusion
+ * constraint still has the final say if two people move into one slot at once.
+ */
+export async function rescheduleMyAppointment(
+  appointmentId: string,
+  startsAt: string,
+): Promise<PortalRescheduleResult> {
+  const session = await requirePatientSession();
+  const db = getDb();
+
+  try {
+    return await db.transaction(async (tx): Promise<PortalRescheduleResult> => {
+      const [existing] = await tx
+        .select({
+          status: appointment.status,
+          startsAt: appointment.startsAt,
+          providerUserId: appointment.providerUserId,
+          duration: appointmentType.defaultDurationMinutes,
+        })
+        .from(appointment)
+        .innerJoin(appointmentType, eq(appointmentType.id, appointment.appointmentTypeId))
+        .where(
+          and(
+            eq(appointment.id, appointmentId),
+            eq(appointment.patientId, session.patientId),
+            eq(appointment.clinicId, session.clinicId),
+            isNull(appointment.archivedAt),
+          ),
+        )
+        .limit(1);
+
+      const verdict = assessSelfService(existing);
+      if (!verdict.ok) {
+        await auditAsPatient(tx, session, {
+          action: 'appointment.update',
+          outcome: 'denied',
+          subjectPatientId: session.patientId,
+          entityType: 'appointment',
+          entityId: appointmentId,
+          metadata: { via: 'portal', operation: 'reschedule', reason: verdict.reason },
+        });
+        return verdict;
+      }
+
+      const slot = await checkSlot(tx, session, {
+        providerUserId: existing!.providerUserId,
+        durationMinutes: existing!.duration,
+        startsAt,
+      });
+      if (!slot.ok) return { ok: false, reason: slot.reason };
+
+      await tx
+        .update(appointment)
+        .set({ during: slot.range, version: sql`${appointment.version} + 1` })
+        .where(eq(appointment.id, appointmentId));
+
+      await auditAsPatient(tx, session, {
+        action: 'appointment.update',
+        outcome: 'allowed',
+        subjectPatientId: session.patientId,
+        entityType: 'appointment',
+        entityId: appointmentId,
+        metadata: { via: 'portal', operation: 'reschedule' },
+      });
+
+      return { ok: true };
     });
   } catch (error) {
     if (isSlotContention(error)) return { ok: false, reason: 'slot_taken' };

@@ -6,6 +6,7 @@ import { portalLogoutAction } from '@/server/actions/portal';
 import { getBookingOptions, listMyAppointments } from '@/server/portal/data';
 import { getPatientSession } from '@/server/portal/session';
 
+import { AppointmentActions } from './AppointmentActions';
 import { BookForm } from './BookForm';
 
 export const metadata = { title: 'Your appointments · Cliniqo' };
@@ -113,6 +114,9 @@ export default async function PortalHomePage() {
                   {a.typeName} · {a.providerName}
                 </span>
                 <Badge tone={statusTone(a.status)}>{a.status.replace(/_/g, ' ')}</Badge>
+                {a.status === 'scheduled' ? (
+                  <AppointmentActions appointmentId={a.id} timeZone={tz} />
+                ) : null}
               </article>
             ))
         )}

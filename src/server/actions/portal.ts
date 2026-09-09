@@ -6,8 +6,10 @@ import { redirect } from 'next/navigation';
 import { formFields } from '@/lib/patient-schemas';
 import {
   portalBookInput,
+  portalCancelInput,
   portalClaimInput,
   portalLoginInput,
+  portalRescheduleInput,
 } from '@/lib/portal-schemas';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import { requestMeta, safeInet } from '@/server/auth/session';
@@ -15,7 +17,11 @@ import {
   redeemPatientSetupToken,
   verifyPatientLogin,
 } from '@/server/portal/accounts';
-import { bookMyAppointment } from '@/server/portal/data';
+import {
+  bookMyAppointment,
+  cancelMyAppointment,
+  rescheduleMyAppointment,
+} from '@/server/portal/data';
 import {
   clearPortalCookie,
   getPatientSession,
@@ -132,4 +138,57 @@ export async function portalBookAction(
 
   revalidatePath('/portal');
   return { ok: true, message: 'Appointment booked. It is listed below.' };
+}
+
+/*
+ * Why a patient was refused, in words they can act on.
+ *
+ * Shared by cancel and reschedule so the two never explain the same refusal differently.
+ * `not_found` deliberately reads as "no longer available" rather than "that is not yours":
+ * an id the caller does not own and an id that has been archived get the same answer, so
+ * the portal cannot be used to probe which appointment ids exist.
+ */
+const CHANGE_DENIALS: Record<string, string> = {
+  not_found: 'That appointment is no longer available.',
+  not_changeable:
+    'That appointment can no longer be changed online. Please call the clinic.',
+  too_late:
+    'That appointment has already started or passed. Please call the clinic.',
+  invalid_time: 'That is not a valid date and time.',
+  past: 'Choose a time in the future.',
+  outside_hours: 'The clinic is not open then.',
+  unavailable: 'That clinician is not available then. Please choose another time.',
+  unknown_provider: 'That clinician is no longer taking bookings. Please call the clinic.',
+  slot_taken: 'That slot was just taken. Please choose another time.',
+};
+
+export async function portalCancelAction(
+  _prev: PortalFormState,
+  formData: FormData,
+): Promise<PortalFormState> {
+  const parsed = portalCancelInput.safeParse(formFields(formData));
+  if (!parsed.success) return { message: 'Bad request.' };
+
+  const result = await cancelMyAppointment(parsed.data.appointmentId);
+  if (!result.ok) return { message: CHANGE_DENIALS[result.reason] ?? 'That did not work.' };
+
+  revalidatePath('/portal');
+  return { ok: true, message: 'Appointment cancelled.' };
+}
+
+export async function portalRescheduleAction(
+  _prev: PortalFormState,
+  formData: FormData,
+): Promise<PortalFormState> {
+  const parsed = portalRescheduleInput.safeParse(formFields(formData));
+  if (!parsed.success) return { errors: fieldErrors(parsed.error) };
+
+  const result = await rescheduleMyAppointment(
+    parsed.data.appointmentId,
+    parsed.data.startsAt,
+  );
+  if (!result.ok) return { message: CHANGE_DENIALS[result.reason] ?? 'That did not work.' };
+
+  revalidatePath('/portal');
+  return { ok: true, message: 'Appointment moved.' };
 }
