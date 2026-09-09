@@ -40,6 +40,10 @@ export const portalBookInput = z
   })
   .strict();
 
+export const portalSlotsInput = z
+  .object({ appointmentTypeId: z.uuid('Choose a visit type.') })
+  .strict();
+
 export const portalCancelInput = z.object({ appointmentId: z.uuid() }).strict();
 
 export const portalRescheduleInput = z

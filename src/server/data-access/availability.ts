@@ -9,7 +9,7 @@ import {
   userAccount,
   userRole,
 } from '@/db/schema';
-import { zonedWallClock } from '@/lib/clinic-time';
+import { parseTstzRange, zonedWallClock } from '@/lib/clinic-time';
 import type { ExceptionInput } from '@/lib/availability-schemas';
 
 import { auditedRead, auditedWrite } from './audited';
@@ -51,11 +51,6 @@ export type AvailabilityView = {
   availability: AvailabilityRow[];
   exceptions: ExceptionRow[];
 };
-
-function parseRange(during: string): [Date, Date] {
-  const m = /^\[(.+),(.+)\)$/.exec(during);
-  return m ? [new Date(m[1]!), new Date(m[2]!)] : [new Date(), new Date()];
-}
 
 export async function getAvailabilityView(): Promise<AvailabilityView> {
   return auditedRead(
@@ -115,7 +110,7 @@ export async function getAvailabilityView(): Promise<AvailabilityView> {
         .orderBy(sql`lower(${scheduleException.during}) asc`);
 
       const exceptions: ExceptionRow[] = exceptionRows.map((r) => {
-        const [startsAt, endsAt] = parseRange(r.during as unknown as string);
+        const [startsAt, endsAt] = parseTstzRange(r.during as unknown as string);
         return {
           id: r.id,
           providerUserId: r.providerUserId,

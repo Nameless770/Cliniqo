@@ -14,12 +14,29 @@
  * offset is asked for at the specific instant rather than assumed constant.
  */
 
+/*
+ * One formatter per timezone, reused.
+ *
+ * Constructing an `Intl.DateTimeFormat` is the expensive part of asking for an offset —
+ * it loads and binds tz data. The slot finder converts a wall clock per candidate slot,
+ * which is hundreds of calls for one page, and building a formatter each time turned a
+ * cheap arithmetic loop into the slowest thing on the request. A clinic has one timezone,
+ * so the map holds one entry; it is keyed anyway because the type says it can vary.
+ */
+const offsetFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function offsetFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = offsetFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' });
+    offsetFormatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
 /** The UTC offset in minutes that `timeZone` had at `instant`. */
 function offsetMinutesAt(instant: Date, timeZone: string): number {
-  const name = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    timeZoneName: 'longOffset',
-  })
+  const name = offsetFormatter(timeZone)
     .formatToParts(instant)
     .find((p) => p.type === 'timeZoneName')?.value;
 
@@ -160,4 +177,30 @@ export function formatWallClockInZone(instant: Date, timeZone: string): string {
   // en-CA renders hour 24 for midnight in some runtimes; normalise to 00.
   const hour = get('hour') === '24' ? '00' : get('hour');
   return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`;
+}
+
+/**
+ * One bound of a PostgreSQL range, as a Date.
+ *
+ * Two things stand between the text PostgreSQL emits and a spec-compliant ISO string, and
+ * both were previously papered over by V8's lenient fallback parser — which no
+ * specification promises and which `Date.parse` explicitly leaves implementation-defined:
+ *
+ *   1. The bound is QUOTED, because a timestamp contains a space.
+ *   2. A whole-hour offset renders as `+00`; ISO 8601 requires `+00:00`.
+ *
+ * `["2027-03-01 09:00:00+00", ...)` therefore has to become `2027-03-01T09:00:00+00:00`
+ * before `new Date` will parse it by the rules rather than by good luck. Every appointment
+ * time shown to a patient depends on this, so it is done explicitly.
+ */
+function rangeBound(raw: string): Date {
+  const unquoted = raw.replace(/^"|"$/g, '').replace(' ', 'T');
+  return new Date(unquoted.replace(/([+-]\d{2})$/, '$1:00'));
+}
+
+/** The two instants of a PostgreSQL `tstzrange` in its text form. */
+export function parseTstzRange(during: string): [Date, Date] {
+  const match = /^\[(.+),(.+)\)$/.exec(during);
+  if (!match) return [new Date(NaN), new Date(NaN)];
+  return [rangeBound(match[1]!), rangeBound(match[2]!)];
 }

@@ -34,9 +34,11 @@ vi.mock('@/server/portal/session', async (importOriginal) => {
 import {
   bookMyAppointment,
   cancelMyAppointment,
+  getOpenSlots,
   listMyAppointments,
   rescheduleMyAppointment,
 } from '@/server/portal/data';
+import { zonedDayRange } from '@/lib/clinic-time';
 
 /**
  * Patient portal, through the real audited path.
@@ -286,5 +288,105 @@ describe('patient portal booking and scoping', () => {
       [id],
     );
     expect(new Date(row.rows[0]!.starts).toISOString()).toBe('2031-10-08T13:00:00.000Z');
+  });
+
+  /*
+   * Open slots. These assert the property that makes the booking screen trustworthy: what
+   * it offers is exactly what `checkSlot` will accept. Every filter below is one the
+   * patient cannot see and must not have to guess.
+   */
+  describe('open slots', () => {
+    it("offers only times inside the clinician's published availability", async () => {
+      const before = await getOpenSlots(base.appointmentTypeId);
+      expect(before.ok).toBe(true);
+      // With wide-open clinic hours and no published availability, times run all day.
+      const wideOpen = before.ok ? before.providers[0]?.days[0]?.slots ?? [] : [];
+      expect(wideOpen.some((s) => s.label < '09:00')).toBe(true);
+
+      const owner = await ownerPool.connect();
+      try {
+        await owner.query(
+          `INSERT INTO provider_availability (clinic_id, provider_user_id, day_of_week, starts_at, ends_at)
+           SELECT $1, $2, d, '09:00', '11:00' FROM generate_series(0,6) d`,
+          [base.clinicId, base.providerId],
+        );
+      } finally {
+        owner.release();
+      }
+
+      const after = await getOpenSlots(base.appointmentTypeId);
+      expect(after.ok).toBe(true);
+      if (!after.ok) return;
+
+      const labels = after.providers.flatMap((p) => p.days.flatMap((d) => d.slots)).map(
+        (s) => s.label,
+      );
+      expect(labels.length).toBeGreaterThan(0);
+      // 20-minute visits inside 09:00-11:00 start at 09:00, 09:20, 09:40, 10:00, …, 10:40.
+      for (const label of labels) {
+        expect(label >= '09:00').toBe(true);
+        expect(label <= '10:40').toBe(true);
+      }
+    });
+
+    it('stops offering a slot once it is booked', async () => {
+      const before = await getOpenSlots(base.appointmentTypeId);
+      expect(before.ok).toBe(true);
+      if (!before.ok) return;
+
+      const provider = before.providers[0]!;
+      const day = provider.days[0]!;
+      const slot = day.slots[0]!;
+
+      const booked = await bookMyAppointment({
+        providerUserId: provider.providerUserId,
+        appointmentTypeId: base.appointmentTypeId,
+        startsAt: slot.startsAt,
+      });
+      expect(booked.ok).toBe(true);
+
+      const after = await getOpenSlots(base.appointmentTypeId);
+      expect(after.ok).toBe(true);
+      if (!after.ok) return;
+
+      const stillOffered = after.providers
+        .find((p) => p.providerUserId === provider.providerUserId)
+        ?.days.find((d) => d.date === day.date)
+        ?.slots.some((s) => s.startsAt === slot.startsAt);
+      expect(stillOffered ?? false).toBe(false);
+    });
+
+    it('drops a day entirely when the clinic is closed', async () => {
+      const before = await getOpenSlots(base.appointmentTypeId);
+      expect(before.ok).toBe(true);
+      if (!before.ok) return;
+
+      // A day that currently HAS openings, so its disappearance means something.
+      const target = before.providers[0]!.days.at(-1)!.date;
+      const [dayStart, dayEnd] = zonedDayRange(target, 'America/New_York');
+
+      const owner = await ownerPool.connect();
+      try {
+        await owner.query(
+          `INSERT INTO schedule_exception (clinic_id, during, kind, reason)
+           VALUES ($1, tstzrange($2::timestamptz, $3::timestamptz), 'closure', 'Test closure')`,
+          [base.clinicId, dayStart.toISOString(), dayEnd.toISOString()],
+        );
+      } finally {
+        owner.release();
+      }
+
+      const after = await getOpenSlots(base.appointmentTypeId);
+      expect(after.ok).toBe(true);
+      if (!after.ok) return;
+
+      const dates = after.providers.flatMap((p) => p.days.map((d) => d.date));
+      expect(dates).not.toContain(target);
+    });
+
+    it('refuses an unknown visit type rather than offering everything', async () => {
+      const result = await getOpenSlots(crypto.randomUUID());
+      expect(result).toEqual({ ok: false, reason: 'unknown_type' });
+    });
   });
 });

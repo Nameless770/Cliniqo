@@ -10,6 +10,7 @@ import {
   portalClaimInput,
   portalLoginInput,
   portalRescheduleInput,
+  portalSlotsInput,
 } from '@/lib/portal-schemas';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import { requestMeta, safeInet } from '@/server/auth/session';
@@ -20,7 +21,9 @@ import {
 import {
   bookMyAppointment,
   cancelMyAppointment,
+  getOpenSlots,
   rescheduleMyAppointment,
+  type ProviderOpenings,
 } from '@/server/portal/data';
 import {
   clearPortalCookie,
@@ -115,29 +118,86 @@ export async function portalClaimAction(
   return { ok: true, message: 'Password set. You can now sign in.' };
 }
 
-export async function portalBookAction(
-  _prev: PortalFormState,
-  formData: FormData,
-): Promise<PortalFormState> {
-  const parsed = portalBookInput.safeParse(formFields(formData));
-  if (!parsed.success) return { errors: fieldErrors(parsed.error) };
+/**
+ * The booking screen's one action: find open times, and take one.
+ *
+ * ONE action rather than two because the screen has one piece of state — the list of
+ * openings — and both operations change it. Booking has to hand back a freshly recomputed
+ * list, or the slot just taken sits there looking available until the patient reloads. Two
+ * separate action states would leave the component deciding which of them is newer, which
+ * is a bug waiting for the first patient who changes visit type after booking.
+ *
+ * `intent` selects the operation and is stripped before validation, so each branch still
+ * parses against a `.strict()` schema that knows nothing about it.
+ */
+export type PortalScheduleState = {
+  /** The visit type the openings below belong to. */
+  typeId?: string;
+  typeName?: string;
+  durationMinutes?: number;
+  clinicTimeZone?: string;
+  providers?: ProviderOpenings[];
+  message?: string;
+  ok?: boolean;
+  errors?: Record<string, string[]>;
+};
 
-  const result = await bookMyAppointment(parsed.data);
-  if (!result.ok) {
-    const messages: Record<typeof result.reason, string> = {
-      invalid_time: 'That is not a valid date and time.',
-      past: 'Choose a time in the future.',
-      outside_hours: 'The clinic is not open then. Check the opening hours shown above.',
-      unavailable: 'That clinician is not available then. Please choose another time.',
-      unknown_provider: 'That clinician is not available for booking.',
-      unknown_type: 'That visit type is no longer offered.',
-      slot_taken: 'That slot was just taken. Please choose another time.',
-    };
-    return { message: messages[result.reason] };
+async function openingsFor(
+  appointmentTypeId: string,
+): Promise<Omit<PortalScheduleState, 'message' | 'ok' | 'errors'>> {
+  const slots = await getOpenSlots(appointmentTypeId);
+  if (!slots.ok) return {};
+  return {
+    typeId: appointmentTypeId,
+    typeName: slots.typeName,
+    durationMinutes: slots.durationMinutes,
+    clinicTimeZone: slots.clinicTimeZone,
+    providers: slots.providers,
+  };
+}
+
+export async function portalScheduleAction(
+  _prev: PortalScheduleState,
+  formData: FormData,
+): Promise<PortalScheduleState> {
+  const fields = formFields(formData);
+  const intent = fields['intent'];
+  delete fields['intent'];
+
+  if (intent === 'book') {
+    const parsed = portalBookInput.safeParse(fields);
+    if (!parsed.success) return { errors: fieldErrors(parsed.error) };
+
+    const result = await bookMyAppointment(parsed.data);
+    /* Recomputed either way. A refusal is usually "somebody just took that", and the
+       honest response to that is a list without it. */
+    const openings = await openingsFor(parsed.data.appointmentTypeId);
+
+    if (!result.ok) {
+      const messages: Record<typeof result.reason, string> = {
+        invalid_time: 'That is not a valid date and time.',
+        past: 'That time has passed. Please choose another.',
+        outside_hours: 'The clinic is not open then.',
+        unavailable: 'That clinician is not available then. Please choose another time.',
+        unknown_provider: 'That clinician is not available for booking.',
+        unknown_type: 'That visit type is no longer offered.',
+        slot_taken: 'That slot was just taken. Please choose another time.',
+      };
+      return { ...openings, message: messages[result.reason] };
+    }
+
+    revalidatePath('/portal');
+    return { ...openings, ok: true, message: 'Appointment booked. It is listed below.' };
   }
 
-  revalidatePath('/portal');
-  return { ok: true, message: 'Appointment booked. It is listed below.' };
+  const parsed = portalSlotsInput.safeParse(fields);
+  if (!parsed.success) return { message: 'Choose a visit type.' };
+
+  const openings = await openingsFor(parsed.data.appointmentTypeId);
+  if (openings.typeId === undefined) {
+    return { message: 'That visit type is no longer offered.' };
+  }
+  return openings;
 }
 
 /*

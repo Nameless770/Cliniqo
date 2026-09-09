@@ -17,7 +17,14 @@ import type { Tx } from '@/server/audit/log';
 import { writeAuditEvent, type AuditInput } from '@/server/audit/log';
 import { requestMeta, safeInet } from '@/server/auth/session';
 import { canTransition, type AppointmentStatus } from '@/lib/appointment-schemas';
-import { zonedWallClock } from '@/lib/clinic-time';
+import {
+  formatDateInZone,
+  parseTstzRange,
+  shiftDate,
+  todayInZone,
+  zonedStartOfDay,
+  zonedWallClock,
+} from '@/lib/clinic-time';
 import { isSlotContention } from '@/lib/pg-errors';
 
 import { requirePatientSession, type PatientSession } from './session';
@@ -104,12 +111,11 @@ export async function listMyAppointments(): Promise<MyAppointments> {
 
     const now = Date.now();
     const mapped: MyAppointment[] = rows.map((r) => {
-      // during is '[start,end)' — parse the two instants for display.
-      const m = /^\[(.+),(.+)\)$/.exec(r.during as unknown as string);
+      const [startsAt, endsAt] = parseTstzRange(r.during as unknown as string);
       return {
         id: r.id,
-        startsAt: m ? new Date(m[1]!) : new Date(),
-        endsAt: m ? new Date(m[2]!) : new Date(),
+        startsAt,
+        endsAt,
         status: r.status,
         typeName: r.typeName,
         providerName: r.providerName,
@@ -185,6 +191,313 @@ export async function getBookingOptions(): Promise<BookingOptions> {
   ]);
 
   return { clinicTimeZone: session.clinicTimeZone, types, providers, hours };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Open slots: "who is free, and when"                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How far ahead to look, and how much of it to show.
+ *
+ * The horizon is the search; the cap is what comes back. A clinician with wide-open hours
+ * has forty openings a day, and three weeks of those is a payload nobody reads and a page
+ * nobody can scan. Six days of real openings is enough to choose from, and the patient who
+ * needs something further out is the patient who should be phoning anyway.
+ */
+const HORIZON_DAYS = 21;
+const MAX_DAYS_SHOWN = 6;
+
+/** Minutes since local midnight, as a half-open window. */
+type Window = { start: number; end: number };
+
+function overlapWindows(a: Window[], b: Window[]): Window[] {
+  const out: Window[] = [];
+  for (const x of a) {
+    for (const y of b) {
+      const start = Math.max(x.start, y.start);
+      const end = Math.min(x.end, y.end);
+      if (end > start) out.push({ start, end });
+    }
+  }
+  return out.sort((p, q) => p.start - q.start);
+}
+
+const pad = (n: number): string => String(n).padStart(2, '0');
+const clockLabel = (minutes: number): string =>
+  `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+
+export type OpenSlot = {
+  /** Wall-clock 'YYYY-MM-DDTHH:mm' in CLINIC time — what the booking action expects. */
+  startsAt: string;
+  /** 'HH:mm', already in clinic time, so the client formats nothing. */
+  label: string;
+};
+
+export type OpenDay = { date: string; label: string; slots: OpenSlot[] };
+
+export type ProviderOpenings = {
+  providerUserId: string;
+  providerName: string;
+  days: OpenDay[];
+};
+
+export type OpenSlotsResult =
+  | {
+      ok: true;
+      clinicTimeZone: string;
+      typeName: string;
+      durationMinutes: number;
+      providers: ProviderOpenings[];
+    }
+  | { ok: false; reason: 'unknown_type' };
+
+/**
+ * Free appointment slots for one visit type, per clinician.
+ *
+ * WHAT THIS DOES AND DOES NOT DISCLOSE. Computing free time requires reading when
+ * clinicians are already busy, and those rows are appointments belonging to OTHER
+ * patients. None of it leaves the server: the busy ranges are used to subtract, and what
+ * returns is only the times that remain. A patient learns "11:00 is not offered", never
+ * that anyone has an appointment, let alone who — which is the minimum-necessary reading
+ * of §164.502(b) for a booking screen.
+ *
+ * Times are offered under exactly the rules `checkSlot` enforces — clinic opening hours,
+ * the clinician's published availability, closures and time off, and existing bookings.
+ * The list is a PREVIEW of that decision, never a substitute for it: the returned slots
+ * are ordinary client-supplied values by the time they come back, so booking re-runs
+ * every check. Two patients handed the same slot still resolve to one winner at the
+ * exclusion constraint.
+ */
+export async function getOpenSlots(appointmentTypeId: string): Promise<OpenSlotsResult> {
+  const session = await requirePatientSession();
+  const db = getDb();
+  const tz = session.clinicTimeZone;
+
+  return db.transaction(async (tx): Promise<OpenSlotsResult> => {
+    const [type] = await tx
+      .select({
+        name: appointmentType.displayName,
+        duration: appointmentType.defaultDurationMinutes,
+      })
+      .from(appointmentType)
+      .where(
+        and(
+          eq(appointmentType.id, appointmentTypeId),
+          eq(appointmentType.clinicId, session.clinicId),
+          eq(appointmentType.isActive, true),
+        ),
+      )
+      .limit(1);
+    if (!type) return { ok: false, reason: 'unknown_type' };
+
+    const today = todayInZone(tz);
+    const dates = Array.from({ length: HORIZON_DAYS }, (_, i) => shiftDate(today, i));
+    const horizonEnd = zonedStartOfDay(shiftDate(today, HORIZON_DAYS), tz);
+    const horizonRange = `[${new Date().toISOString()},${horizonEnd.toISOString()})`;
+
+    const [providers, hours, availability, exceptions, booked] = await Promise.all([
+      tx
+        .selectDistinct({ id: userAccount.id, name: userAccount.fullName })
+        .from(userAccount)
+        .innerJoin(userRole, eq(userRole.userId, userAccount.id))
+        .innerJoin(role, eq(role.id, userRole.roleId))
+        .where(
+          and(
+            eq(userAccount.clinicId, session.clinicId),
+            eq(userAccount.status, 'active'),
+            isNull(userAccount.archivedAt),
+            isNull(userRole.revokedAt),
+            eq(role.code, 'doctor'),
+          ),
+        )
+        .orderBy(asc(userAccount.fullName)),
+      tx
+        .select({
+          dayOfWeek: clinicHours.dayOfWeek,
+          opensAt: clinicHours.opensAt,
+          closesAt: clinicHours.closesAt,
+        })
+        .from(clinicHours)
+        .where(eq(clinicHours.clinicId, session.clinicId)),
+      tx
+        .select({
+          providerUserId: providerAvailability.providerUserId,
+          dayOfWeek: providerAvailability.dayOfWeek,
+          startsAt: providerAvailability.startsAt,
+          endsAt: providerAvailability.endsAt,
+        })
+        .from(providerAvailability)
+        .where(eq(providerAvailability.clinicId, session.clinicId)),
+      tx
+        .select({
+          providerUserId: scheduleException.providerUserId,
+          startsAt: sql<Date>`lower(${scheduleException.during})`,
+          endsAt: sql<Date>`upper(${scheduleException.during})`,
+        })
+        .from(scheduleException)
+        .where(
+          and(
+            eq(scheduleException.clinicId, session.clinicId),
+            sql`${scheduleException.during} && ${horizonRange}::tstzrange`,
+          ),
+        ),
+      /*
+       * Busy time. Deliberately the narrowest projection that answers "is this slot
+       * taken": a provider and two instants. No patient id, no type, no note — a query
+       * that cannot return PHI cannot leak it, whatever the caller does with the result.
+       *
+       * The status filter mirrors the exclusion constraint's own WHERE clause exactly. A
+       * cancelled appointment does not hold its slot in the database, so it must not hold
+       * it here either, or the portal would hide time the clinic is free.
+       */
+      tx
+        .select({
+          providerUserId: appointment.providerUserId,
+          startsAt: sql<Date>`lower(${appointment.during})`,
+          endsAt: sql<Date>`upper(${appointment.during})`,
+        })
+        .from(appointment)
+        .where(
+          and(
+            eq(appointment.clinicId, session.clinicId),
+            isNull(appointment.archivedAt),
+            sql`${appointment.status} not in ('cancelled', 'no_show')`,
+            sql`${appointment.during} && ${horizonRange}::tstzrange`,
+          ),
+        ),
+    ]);
+
+    const hoursByDay = new Map<number, Window[]>();
+    for (const h of hours) {
+      const list = hoursByDay.get(h.dayOfWeek) ?? [];
+      list.push({ start: toMinutes(h.opensAt), end: toMinutes(h.closesAt) });
+      hoursByDay.set(h.dayOfWeek, list);
+    }
+
+    // Provider → weekday → windows. A provider absent from this map publishes no hours.
+    const availByProvider = new Map<string, Map<number, Window[]>>();
+    for (const a of availability) {
+      const byDay = availByProvider.get(a.providerUserId) ?? new Map<number, Window[]>();
+      const list = byDay.get(a.dayOfWeek) ?? [];
+      list.push({ start: toMinutes(a.startsAt), end: toMinutes(a.endsAt) });
+      byDay.set(a.dayOfWeek, list);
+      availByProvider.set(a.providerUserId, byDay);
+    }
+
+    type Busy = { start: number; end: number };
+    const busyByProvider = new Map<string, Busy[]>();
+    const addBusy = (providerId: string, start: Date, end: Date) => {
+      const list = busyByProvider.get(providerId) ?? [];
+      list.push({ start: new Date(start).getTime(), end: new Date(end).getTime() });
+      busyByProvider.set(providerId, list);
+    };
+    for (const b of booked) addBusy(b.providerUserId, b.startsAt, b.endsAt);
+
+    // A clinic-wide closure blocks every clinician; time off blocks only its own.
+    const clinicWideClosures: Busy[] = [];
+    for (const e of exceptions) {
+      if (e.providerUserId) addBusy(e.providerUserId, e.startsAt, e.endsAt);
+      else
+        clinicWideClosures.push({
+          start: new Date(e.startsAt).getTime(),
+          end: new Date(e.endsAt).getTime(),
+        });
+    }
+
+    const now = Date.now();
+    const durationMs = type.duration * 60_000;
+
+    const result: ProviderOpenings[] = [];
+
+    for (const provider of providers) {
+      const published = availByProvider.get(provider.id);
+      const busy = busyByProvider.get(provider.id) ?? [];
+      const days: OpenDay[] = [];
+
+      for (const date of dates) {
+        if (days.length >= MAX_DAYS_SHOWN) break;
+
+        const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
+        const open = hoursByDay.get(dayOfWeek) ?? [];
+        if (open.length === 0) continue;
+
+        /* Published hours NARROW the clinic's; publishing none means the clinic's hours
+           are the only gate. Identical to the rule in `checkSlot`. */
+        const windows = published
+          ? overlapWindows(open, published.get(dayOfWeek) ?? [])
+          : open;
+        if (windows.length === 0) continue;
+
+        const slots: OpenSlot[] = [];
+        for (const window of windows) {
+          for (
+            let minute = window.start;
+            minute + type.duration <= window.end;
+            minute += type.duration
+          ) {
+            const localISO = `${date}T${clockLabel(minute)}`;
+            /* Converted through the same function booking uses, per slot rather than by
+               adding minutes to midnight — on the two days a year the clock shifts,
+               arithmetic from midnight offers times that do not exist. */
+            const start = zonedWallClock(localISO, tz).getTime();
+            const end = start + durationMs;
+
+            if (start <= now) continue;
+            if (clinicWideClosures.some((c) => start < c.end && end > c.start)) continue;
+            if (busy.some((b) => start < b.end && end > b.start)) continue;
+
+            slots.push({ startsAt: localISO, label: clockLabel(minute) });
+          }
+        }
+
+        if (slots.length > 0) {
+          days.push({
+            date,
+            label: formatDateInZone(zonedStartOfDay(date, tz), tz),
+            slots,
+          });
+        }
+      }
+
+      if (days.length > 0) {
+        result.push({
+          providerUserId: provider.id,
+          providerName: provider.name,
+          days,
+        });
+      }
+    }
+
+    /*
+     * Audited as a non-PHI reference read: it discloses the schedule, not a record.
+     *
+     * The visit type is deliberately NOT in the metadata. The actor on this row is the
+     * patient, so recording which type they searched would file "this person was looking
+     * for a sexual-health appointment" into a table with six-year retention and broader
+     * read access than the chart it describes. Metadata carries counts, never the values
+     * a patient chose — the booking that follows is where the type legitimately lands, on
+     * the appointment itself.
+     */
+    await auditAsPatient(tx, session, {
+      action: 'reference.read',
+      outcome: 'allowed',
+      entityType: 'clinic',
+      metadata: {
+        scope: 'portal_open_slots',
+        horizonDays: HORIZON_DAYS,
+        providersWithOpenings: result.length,
+      },
+    });
+
+    return {
+      ok: true,
+      clinicTimeZone: tz,
+      typeName: type.name,
+      durationMinutes: type.duration,
+      providers: result,
+    };
+  });
 }
 
 export type PortalBookInput = {

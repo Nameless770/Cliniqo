@@ -79,7 +79,6 @@ export default async function PortalHomePage() {
         <h2 style={{ fontSize: 'var(--text-md)', margin: 0 }}>Book an appointment</h2>
         <BookForm
           types={options.types}
-          providers={options.providers}
           hours={options.hours}
           timeZone={options.clinicTimeZone}
         />
