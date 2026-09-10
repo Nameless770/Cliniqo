@@ -619,33 +619,31 @@ export async function getBookingOptions(): Promise<{
       metadata: { scope: 'booking_options' },
     },
     async (tx, session) => {
-      const [providers, types] = await Promise.all([
-        tx
-          .select({ id: userAccount.id, name: userAccount.fullName })
-          .from(userAccount)
-          .where(
-            and(
-              eq(userAccount.clinicId, session.clinicId),
-              eq(userAccount.status, 'active'),
-              isNull(userAccount.archivedAt),
-            ),
-          )
-          .orderBy(asc(userAccount.fullName)),
-        tx
-          .select({
-            id: appointmentType.id,
-            name: appointmentType.displayName,
-            durationMinutes: appointmentType.defaultDurationMinutes,
-          })
-          .from(appointmentType)
-          .where(
-            and(
-              eq(appointmentType.clinicId, session.clinicId),
-              eq(appointmentType.isActive, true),
-            ),
-          )
-          .orderBy(asc(appointmentType.sortOrder)),
-      ]);
+      const providers = await tx
+        .select({ id: userAccount.id, name: userAccount.fullName })
+        .from(userAccount)
+        .where(
+          and(
+            eq(userAccount.clinicId, session.clinicId),
+            eq(userAccount.status, 'active'),
+            isNull(userAccount.archivedAt),
+          ),
+        )
+        .orderBy(asc(userAccount.fullName));
+      const types = await tx
+        .select({
+          id: appointmentType.id,
+          name: appointmentType.displayName,
+          durationMinutes: appointmentType.defaultDurationMinutes,
+        })
+        .from(appointmentType)
+        .where(
+          and(
+            eq(appointmentType.clinicId, session.clinicId),
+            eq(appointmentType.isActive, true),
+          ),
+        )
+        .orderBy(asc(appointmentType.sortOrder));
 
       return { providers, types };
     },

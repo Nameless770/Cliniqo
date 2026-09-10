@@ -79,6 +79,12 @@ export const AUDIT_ACTIONS = [
   /* Non-PHI reference data: staff names, appointment types, clinic config. */
   'reference.read',
 
+  /* Symptom triage. The patient's own words about their body — PHI, and audited as
+     such even though the patient is the one disclosing it to their own clinic. */
+  'triage.start',
+  'triage.message',
+  'triage.read',
+
   /* Emergency access — §164.312(a)(2)(ii). */
   'breakglass.grant',
   'breakglass.use',
@@ -124,6 +130,9 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'prescription.create',
   'prescription.cancel',
   'breakglass.use',
+  'triage.start',
+  'triage.message',
+  'triage.read',
 ]);
 
 /**

@@ -866,6 +866,156 @@ void randomUUID;
 /* --------------------------------------------------------------- report */
 
 const groups = [...new Set(results.map((r) => r.group))];
+/* ------------------------------------------------- Transaction concurrency */
+
+/*
+ * No `Promise.all` over a transaction client.
+ *
+ * A Drizzle transaction is bound to ONE node-postgres client, and a client runs one query
+ * at a time — concurrent calls land on its internal queue. So `Promise.all([tx.select(),
+ * tx.select()])` is not concurrent: measured against this project's own database, three
+ * 400ms sleeps took 1226ms through `Promise.all` on a transaction client and 1207ms
+ * sequentially, versus 414ms on a pool where each query gets its own connection.
+ *
+ * It costs nothing and breaks twice. Today it emits a deprecation warning on every call;
+ * in pg@9 the queue is removed and the second query throws — which, inside `auditedWrite`,
+ * means a clinical write and its audit row failing together at runtime on a version bump.
+ *
+ * The pool is the exception and stays allowed: `db.select()` outside a transaction draws a
+ * separate connection per query, so there the concurrency is real. This checks only for a
+ * `tx` receiver inside a `Promise.all` argument list.
+ */
+{
+  const dataFiles = [
+    ...readdirSync('src/server/data-access').map((f) => `src/server/data-access/${f}`),
+    ...readdirSync('src/server/portal').map((f) => `src/server/portal/${f}`),
+  ].filter((p) => p.endsWith('.ts'));
+
+  const offenders = [];
+  for (const file of dataFiles) {
+    const source = read(file);
+    let index = source.indexOf('Promise.all(');
+    while (index >= 0) {
+      // Scan the argument list to its matching paren, then look for a `tx` receiver.
+      let depth = 0;
+      let end = index + 'Promise.all'.length;
+      for (; end < source.length; end++) {
+        const ch = source[end];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          depth--;
+          if (depth === 0) break;
+        }
+      }
+      const args = source.slice(index, end);
+      if (/(^|[^\w.])tx\s*\./.test(args)) {
+        offenders.push(file.split('/').pop());
+      }
+      index = source.indexOf('Promise.all(', end);
+    }
+  }
+
+  check(
+    'Transaction concurrency',
+    `no Promise.all over a transaction client (${dataFiles.length} files scanned)`,
+    offenders.length === 0,
+  );
+  check(
+    'Transaction concurrency',
+    'the measured-parallel pool case is still permitted',
+    read('src/server/portal/data.ts').includes('Promise.all('),
+  );
+}
+
+/* ------------------------------------------------------------ Symptom triage */
+
+/*
+ * The emergency check must come FIRST, and the model must not be able to overturn it.
+ *
+ * This is the one rule in the feature that a refactor could invert without any test going
+ * red at the type level: move the engine call above `detectRedFlag`, and a patient
+ * describing a heart attack gets whatever a language model felt like saying. So the
+ * ordering is asserted structurally, on the source.
+ *
+ * Also asserted: enabling the third-party engine is gated on an explicit BAA
+ * acknowledgement. Symptom text is PHI, and OpenAI does not offer a BAA on the free tier —
+ * so a key pasted in during a late-night experiment must fail to boot, not quietly start
+ * shipping patients' symptoms to a vendor that trains on them.
+ */
+{
+  const orchestrator = read('src/server/triage/index.ts');
+  const redFlagIndex = orchestrator.indexOf('detectRedFlag(request.message)');
+  const engineIndex = orchestrator.indexOf('getTriageEngine().assess');
+
+  check(
+    'Symptom triage',
+    'the emergency check runs before the engine is consulted',
+    redFlagIndex > 0 && engineIndex > 0 && redFlagIndex < engineIndex,
+  );
+
+  check(
+    'Symptom triage',
+    'a red flag returns without reaching the engine',
+    /if\s*\(redFlag\)\s*\{[\s\S]{0,600}?return\s*\{/.test(orchestrator),
+  );
+
+  const envSource = read('src/env/server.ts');
+  check(
+    'Symptom triage',
+    'the third-party engine requires an acknowledged BAA',
+    envSource.includes('TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED') &&
+      envSource.includes("TRIAGE_ENGINE === 'openai'"),
+  );
+  check(
+    'Symptom triage',
+    'the local engine is the default (no PHI leaves by default)',
+    envSource.includes("z.enum(['local', 'openai']).default('local')"),
+  );
+
+  /*
+   * The vendor adapter must be reachable only through the gated factory. A direct
+   * `new OpenAiTriageEngine` anywhere else would bypass the env check entirely.
+   */
+  const constructors = [];
+  for (const dir of ['src/server', 'src/app', 'src/lib']) {
+    const walk = (d) => {
+      for (const entry of readdirSync(d, { withFileTypes: true })) {
+        const p = `${d}/${entry.name}`;
+        if (entry.isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(entry.name) && read(p).includes('new OpenAiTriageEngine(')) {
+          constructors.push(p);
+        }
+      }
+    };
+    walk(dir);
+  }
+  check(
+    'Symptom triage',
+    'the vendor adapter is constructed only by the gated factory',
+    constructors.length === 1 && constructors[0] === 'src/server/triage/index.ts',
+  );
+
+  const triageData = read('src/server/portal/triage.ts');
+  check(
+    'Symptom triage',
+    'every triage read and write is audited as the patient',
+    triageData.includes('auditAsPatient') &&
+      triageData.includes("action: 'triage.read'") &&
+      triageData.includes("action: 'triage.message'"),
+  );
+
+  /*
+   * Symptom text must never reach the audit log. The metadata this layer writes is
+   * lengths, roles and codes; a `body` or `message` value in there would be a second copy
+   * of the chart under six-year retention.
+   */
+  check(
+    'Symptom triage',
+    'no symptom text in audit metadata',
+    !/metadata:\s*\{[^}]*(body|message|symptoms)\s*[,}]/.test(triageData),
+  );
+}
+
 for (const g of groups) {
   console.log(`\n  ${g}`);
   for (const r of results.filter((x) => x.group === g)) {

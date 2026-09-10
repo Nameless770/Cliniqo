@@ -80,30 +80,28 @@ export async function getClinicSettings(): Promise<{
 
       if (!row) return null;
 
-      const [types, hours] = await Promise.all([
-        tx
-          .select({
-            id: appointmentType.id,
-            code: appointmentType.code,
-            displayName: appointmentType.displayName,
-            defaultDurationMinutes: appointmentType.defaultDurationMinutes,
-            isActive: appointmentType.isActive,
-            sortOrder: appointmentType.sortOrder,
-          })
-          .from(appointmentType)
-          .where(eq(appointmentType.clinicId, session.clinicId))
-          .orderBy(asc(appointmentType.sortOrder), asc(appointmentType.displayName)),
-        tx
-          .select({
-            id: clinicHours.id,
-            dayOfWeek: clinicHours.dayOfWeek,
-            opensAt: clinicHours.opensAt,
-            closesAt: clinicHours.closesAt,
-          })
-          .from(clinicHours)
-          .where(eq(clinicHours.clinicId, session.clinicId))
-          .orderBy(asc(clinicHours.dayOfWeek), asc(clinicHours.opensAt)),
-      ]);
+      const types = await tx
+        .select({
+          id: appointmentType.id,
+          code: appointmentType.code,
+          displayName: appointmentType.displayName,
+          defaultDurationMinutes: appointmentType.defaultDurationMinutes,
+          isActive: appointmentType.isActive,
+          sortOrder: appointmentType.sortOrder,
+        })
+        .from(appointmentType)
+        .where(eq(appointmentType.clinicId, session.clinicId))
+        .orderBy(asc(appointmentType.sortOrder), asc(appointmentType.displayName));
+      const hours = await tx
+        .select({
+          id: clinicHours.id,
+          dayOfWeek: clinicHours.dayOfWeek,
+          opensAt: clinicHours.opensAt,
+          closesAt: clinicHours.closesAt,
+        })
+        .from(clinicHours)
+        .where(eq(clinicHours.clinicId, session.clinicId))
+        .orderBy(asc(clinicHours.dayOfWeek), asc(clinicHours.opensAt));
 
       return { clinic: row as ClinicSettings, types, hours };
     },

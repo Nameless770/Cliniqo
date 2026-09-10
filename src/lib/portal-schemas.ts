@@ -44,6 +44,19 @@ export const portalSlotsInput = z
   .object({ appointmentTypeId: z.uuid('Choose a visit type.') })
   .strict();
 
+export const portalTriageInput = z
+  .object({
+    /* Empty string means "start a new conversation" — a select's empty option, not a
+       missing field, so the shape stays strict. */
+    conversationId: z.union([z.uuid(), z.literal('')]).optional(),
+    message: z
+      .string()
+      .trim()
+      .min(1, 'Tell us what is going on.')
+      .max(2000, 'Please keep it under 2000 characters.'),
+  })
+  .strict();
+
 export const portalCancelInput = z.object({ appointmentId: z.uuid() }).strict();
 
 export const portalRescheduleInput = z

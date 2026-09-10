@@ -11,6 +11,7 @@ import {
   portalLoginInput,
   portalRescheduleInput,
   portalSlotsInput,
+  portalTriageInput,
 } from '@/lib/portal-schemas';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import { requestMeta, safeInet } from '@/server/auth/session';
@@ -18,6 +19,7 @@ import {
   redeemPatientSetupToken,
   verifyPatientLogin,
 } from '@/server/portal/accounts';
+import { sendTriageMessage } from '@/server/portal/triage';
 import {
   bookMyAppointment,
   cancelMyAppointment,
@@ -198,6 +200,50 @@ export async function portalScheduleAction(
     return { message: 'That visit type is no longer offered.' };
   }
   return openings;
+}
+
+
+/**
+ * Symptom triage: the patient describes something, and gets one short answer back.
+ *
+ * The action does no assessment of its own — it validates, delegates, and translates
+ * refusals into sentences. The emergency check, the engine choice and the audit all live
+ * below it, so this cannot become the place where a safety rule is quietly skipped.
+ */
+export type PortalTriageState = {
+  errors?: Record<string, string[]>;
+  message?: string;
+  ok?: boolean;
+  /** Present when an emergency pattern fired: the UI renders an alert, not a chat turn. */
+  redFlag?: boolean;
+};
+
+export async function portalTriageAction(
+  _prev: PortalTriageState,
+  formData: FormData,
+): Promise<PortalTriageState> {
+  const parsed = portalTriageInput.safeParse(formFields(formData));
+  if (!parsed.success) return { errors: fieldErrors(parsed.error) };
+
+  const result = await sendTriageMessage(
+    parsed.data.conversationId || null,
+    parsed.data.message,
+  );
+
+  if (!result.ok) {
+    const messages: Record<typeof result.reason, string> = {
+      empty: 'Tell us what is going on.',
+      too_long: 'Please keep it under 2000 characters.',
+      not_found: 'That conversation is no longer available.',
+      closed: 'That conversation has been closed by the clinic. Start a new one.',
+      upstream:
+        'The assistant is unavailable right now. Your message was saved — please try again, or book an appointment directly.',
+    };
+    return { message: messages[result.reason] };
+  }
+
+  revalidatePath('/portal/assistant');
+  return { ok: true, redFlag: result.redFlagCode !== null };
 }
 
 /*

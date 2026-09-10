@@ -43,7 +43,7 @@ import { requirePatientSession, type PatientSession } from './session';
  * (`actor_patient_account_id`), so "who booked this" is answerable for self-service too.
  */
 
-async function auditAsPatient(
+export async function auditAsPatient(
   tx: Tx,
   session: PatientSession,
   event: Omit<AuditInput, 'clinicId' | 'actorPatientAccountId' | 'sessionId'>,
@@ -296,77 +296,79 @@ export async function getOpenSlots(appointmentTypeId: string): Promise<OpenSlots
     const horizonEnd = zonedStartOfDay(shiftDate(today, HORIZON_DAYS), tz);
     const horizonRange = `[${new Date().toISOString()},${horizonEnd.toISOString()})`;
 
-    const [providers, hours, availability, exceptions, booked] = await Promise.all([
-      tx
-        .selectDistinct({ id: userAccount.id, name: userAccount.fullName })
-        .from(userAccount)
-        .innerJoin(userRole, eq(userRole.userId, userAccount.id))
-        .innerJoin(role, eq(role.id, userRole.roleId))
-        .where(
-          and(
-            eq(userAccount.clinicId, session.clinicId),
-            eq(userAccount.status, 'active'),
-            isNull(userAccount.archivedAt),
-            isNull(userRole.revokedAt),
-            eq(role.code, 'doctor'),
-          ),
-        )
-        .orderBy(asc(userAccount.fullName)),
-      tx
-        .select({
-          dayOfWeek: clinicHours.dayOfWeek,
-          opensAt: clinicHours.opensAt,
-          closesAt: clinicHours.closesAt,
-        })
-        .from(clinicHours)
-        .where(eq(clinicHours.clinicId, session.clinicId)),
-      tx
-        .select({
-          providerUserId: providerAvailability.providerUserId,
-          dayOfWeek: providerAvailability.dayOfWeek,
-          startsAt: providerAvailability.startsAt,
-          endsAt: providerAvailability.endsAt,
-        })
-        .from(providerAvailability)
-        .where(eq(providerAvailability.clinicId, session.clinicId)),
-      tx
-        .select({
-          providerUserId: scheduleException.providerUserId,
-          startsAt: sql<Date>`lower(${scheduleException.during})`,
-          endsAt: sql<Date>`upper(${scheduleException.during})`,
-        })
-        .from(scheduleException)
-        .where(
-          and(
-            eq(scheduleException.clinicId, session.clinicId),
-            sql`${scheduleException.during} && ${horizonRange}::tstzrange`,
-          ),
+    const providers = await tx
+      .selectDistinct({ id: userAccount.id, name: userAccount.fullName })
+      .from(userAccount)
+      .innerJoin(userRole, eq(userRole.userId, userAccount.id))
+      .innerJoin(role, eq(role.id, userRole.roleId))
+      .where(
+        and(
+          eq(userAccount.clinicId, session.clinicId),
+          eq(userAccount.status, 'active'),
+          isNull(userAccount.archivedAt),
+          isNull(userRole.revokedAt),
+          eq(role.code, 'doctor'),
         ),
-      /*
-       * Busy time. Deliberately the narrowest projection that answers "is this slot
-       * taken": a provider and two instants. No patient id, no type, no note — a query
-       * that cannot return PHI cannot leak it, whatever the caller does with the result.
-       *
-       * The status filter mirrors the exclusion constraint's own WHERE clause exactly. A
-       * cancelled appointment does not hold its slot in the database, so it must not hold
-       * it here either, or the portal would hide time the clinic is free.
-       */
-      tx
-        .select({
-          providerUserId: appointment.providerUserId,
-          startsAt: sql<Date>`lower(${appointment.during})`,
-          endsAt: sql<Date>`upper(${appointment.during})`,
-        })
-        .from(appointment)
-        .where(
-          and(
-            eq(appointment.clinicId, session.clinicId),
-            isNull(appointment.archivedAt),
-            sql`${appointment.status} not in ('cancelled', 'no_show')`,
-            sql`${appointment.during} && ${horizonRange}::tstzrange`,
-          ),
+      )
+      .orderBy(asc(userAccount.fullName));
+
+    const hours = await tx
+      .select({
+        dayOfWeek: clinicHours.dayOfWeek,
+        opensAt: clinicHours.opensAt,
+        closesAt: clinicHours.closesAt,
+      })
+      .from(clinicHours)
+      .where(eq(clinicHours.clinicId, session.clinicId));
+
+    const availability = await tx
+      .select({
+        providerUserId: providerAvailability.providerUserId,
+        dayOfWeek: providerAvailability.dayOfWeek,
+        startsAt: providerAvailability.startsAt,
+        endsAt: providerAvailability.endsAt,
+      })
+      .from(providerAvailability)
+      .where(eq(providerAvailability.clinicId, session.clinicId));
+
+    const exceptions = await tx
+      .select({
+        providerUserId: scheduleException.providerUserId,
+        startsAt: sql<Date>`lower(${scheduleException.during})`,
+        endsAt: sql<Date>`upper(${scheduleException.during})`,
+      })
+      .from(scheduleException)
+      .where(
+        and(
+          eq(scheduleException.clinicId, session.clinicId),
+          sql`${scheduleException.during} && ${horizonRange}::tstzrange`,
         ),
-    ]);
+      );
+
+    /*
+     * Busy time. Deliberately the narrowest projection that answers "is this slot
+     * taken": a provider and two instants. No patient id, no type, no note — a query
+     * that cannot return PHI cannot leak it, whatever the caller does with the result.
+     *
+     * The status filter mirrors the exclusion constraint's own WHERE clause exactly. A
+     * cancelled appointment does not hold its slot in the database, so it must not hold
+     * it here either, or the portal would hide time the clinic is free.
+     */
+    const booked = await tx
+      .select({
+        providerUserId: appointment.providerUserId,
+        startsAt: sql<Date>`lower(${appointment.during})`,
+        endsAt: sql<Date>`upper(${appointment.during})`,
+      })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.clinicId, session.clinicId),
+          isNull(appointment.archivedAt),
+          sql`${appointment.status} not in ('cancelled', 'no_show')`,
+          sql`${appointment.during} && ${horizonRange}::tstzrange`,
+        ),
+      );
 
     const hoursByDay = new Map<number, Window[]>();
     for (const h of hours) {
@@ -527,11 +529,7 @@ const toMinutes = (hms: string): number => {
 };
 
 export type SlotDenial =
-  | 'invalid_time'
-  | 'past'
-  | 'outside_hours'
-  | 'unavailable'
-  | 'unknown_provider';
+  'invalid_time' | 'past' | 'outside_hours' | 'unavailable' | 'unknown_provider';
 
 type SlotCheck = { ok: true; range: string } | { ok: false; reason: SlotDenial };
 
@@ -586,7 +584,10 @@ async function checkSlot(
     .select({ opensAt: clinicHours.opensAt, closesAt: clinicHours.closesAt })
     .from(clinicHours)
     .where(
-      and(eq(clinicHours.clinicId, session.clinicId), eq(clinicHours.dayOfWeek, dayOfWeek)),
+      and(
+        eq(clinicHours.clinicId, session.clinicId),
+        eq(clinicHours.dayOfWeek, dayOfWeek),
+      ),
     );
   const withinHours = windows.some(
     (w) => toMinutes(w.opensAt) <= startMinutes && endMinutes <= toMinutes(w.closesAt),
@@ -730,8 +731,7 @@ export async function bookMyAppointment(
  * call to the clinic, which is also the honest answer for a late cancellation.
  */
 type SelfServiceCheck =
-  | { ok: true }
-  | { ok: false; reason: 'not_found' | 'too_late' | 'not_changeable' };
+  { ok: true } | { ok: false; reason: 'not_found' | 'too_late' | 'not_changeable' };
 
 function assessSelfService(
   existing: { status: string; startsAt: Date | null } | undefined,
@@ -749,8 +749,7 @@ function assessSelfService(
 }
 
 export type PortalCancelResult =
-  | { ok: true }
-  | { ok: false; reason: 'not_found' | 'too_late' | 'not_changeable' };
+  { ok: true } | { ok: false; reason: 'not_found' | 'too_late' | 'not_changeable' };
 
 /**
  * The patient cancels their own appointment.

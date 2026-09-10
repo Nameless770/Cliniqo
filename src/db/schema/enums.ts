@@ -181,9 +181,31 @@ export const auditEntityType = pgEnum('audit_entity_type', [
   'patient_session',
   'clinic',
   'break_glass_grant',
+  'triage_conversation',
+  'triage_message',
   /* Reading the audit log is itself an audited event, and its object is the log. */
   'audit_event',
 ]);
+
+/**
+ * Triage.
+ *
+ * `urgency` is ordered by how fast someone must be seen, and `emergency` exists as its
+ * own value rather than as the top of a severity scale because it does not mean "book
+ * sooner" — it means stop using this application and call an ambulance. Code that maps
+ * urgency to a booking lead time must have no branch for it.
+ */
+export const triageUrgency = pgEnum('triage_urgency', [
+  'emergency',
+  'urgent',
+  'routine',
+  'self_care',
+]);
+
+export const triageStatus = pgEnum('triage_status', ['open', 'closed']);
+
+/** Who wrote a turn. Never a clinician: nothing here is clinical advice. */
+export const triageMessageRole = pgEnum('triage_message_role', ['patient', 'assistant']);
 
 export const breakGlassReviewOutcome = pgEnum('break_glass_review_outcome', [
   'pending',

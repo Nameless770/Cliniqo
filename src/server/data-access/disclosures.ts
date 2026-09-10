@@ -218,79 +218,64 @@ export async function exportPatientRecord(
 
       if (!p) return null;
 
-      const [allergies, flags, appts, notes, scripts] = await Promise.all([
-        tx
-          .select({
-            allergen: patientAllergy.allergenName,
-            reaction: patientAllergy.reaction,
-            severity: patientAllergy.severity,
-          })
-          .from(patientAllergy)
-          .where(
-            and(
-              eq(patientAllergy.patientId, patientId),
-              isNull(patientAllergy.archivedAt),
-            ),
-          ),
-        tx
-          .select({
-            label: patientFlag.label,
-            detail: patientFlag.detail,
-            severity: patientFlag.severity,
-          })
-          .from(patientFlag)
-          .where(
-            and(eq(patientFlag.patientId, patientId), isNull(patientFlag.archivedAt)),
-          ),
-        tx
-          .select({
-            when: appointment.startsAt,
-            type: appointmentType.displayName,
-            clinician: userAccount.fullName,
-            status: appointment.status,
-          })
-          .from(appointment)
-          .innerJoin(
-            appointmentType,
-            eq(appointmentType.id, appointment.appointmentTypeId),
-          )
-          .innerJoin(userAccount, eq(userAccount.id, appointment.providerUserId))
-          .where(
-            and(eq(appointment.patientId, patientId), isNull(appointment.archivedAt)),
-          )
-          .orderBy(desc(appointment.startsAt)),
-        tx
-          .select({
-            noteId: visitNote.id,
-            signedAt: visitNote.signedAt,
-            author: userAccount.fullName,
-          })
-          .from(visitNote)
-          .innerJoin(userAccount, eq(userAccount.id, visitNote.authorUserId))
-          .where(and(eq(visitNote.patientId, patientId), isNull(visitNote.archivedAt)))
-          .orderBy(desc(visitNote.createdAt)),
-        tx
-          .select({
-            issuedAt: prescription.signedAt,
-            prescriber: userAccount.fullName,
-            status: prescription.status,
-            medication: medication.name,
-            dose: prescriptionItem.dose,
-            frequency: prescriptionItem.frequency,
-            instructions: prescriptionItem.instructions,
-          })
-          .from(prescription)
-          .innerJoin(userAccount, eq(userAccount.id, prescription.prescriberUserId))
-          .innerJoin(
-            prescriptionItem,
-            eq(prescriptionItem.prescriptionId, prescription.id),
-          )
-          .innerJoin(medication, eq(medication.id, prescriptionItem.medicationId))
-          .where(
-            and(eq(prescription.patientId, patientId), isNull(prescription.archivedAt)),
-          )
-          .orderBy(desc(prescription.signedAt)),
-      ]);
+      const allergies = await tx
+        .select({
+          allergen: patientAllergy.allergenName,
+          reaction: patientAllergy.reaction,
+          severity: patientAllergy.severity,
+        })
+        .from(patientAllergy)
+        .where(
+          and(eq(patientAllergy.patientId, patientId), isNull(patientAllergy.archivedAt)),
+        );
+      const flags = await tx
+        .select({
+          label: patientFlag.label,
+          detail: patientFlag.detail,
+          severity: patientFlag.severity,
+        })
+        .from(patientFlag)
+        .where(and(eq(patientFlag.patientId, patientId), isNull(patientFlag.archivedAt)));
+      const appts = await tx
+        .select({
+          when: appointment.startsAt,
+          type: appointmentType.displayName,
+          clinician: userAccount.fullName,
+          status: appointment.status,
+        })
+        .from(appointment)
+        .innerJoin(appointmentType, eq(appointmentType.id, appointment.appointmentTypeId))
+        .innerJoin(userAccount, eq(userAccount.id, appointment.providerUserId))
+        .where(and(eq(appointment.patientId, patientId), isNull(appointment.archivedAt)))
+        .orderBy(desc(appointment.startsAt));
+      const notes = await tx
+        .select({
+          noteId: visitNote.id,
+          signedAt: visitNote.signedAt,
+          author: userAccount.fullName,
+        })
+        .from(visitNote)
+        .innerJoin(userAccount, eq(userAccount.id, visitNote.authorUserId))
+        .where(and(eq(visitNote.patientId, patientId), isNull(visitNote.archivedAt)))
+        .orderBy(desc(visitNote.createdAt));
+      const scripts = await tx
+        .select({
+          issuedAt: prescription.signedAt,
+          prescriber: userAccount.fullName,
+          status: prescription.status,
+          medication: medication.name,
+          dose: prescriptionItem.dose,
+          frequency: prescriptionItem.frequency,
+          instructions: prescriptionItem.instructions,
+        })
+        .from(prescription)
+        .innerJoin(userAccount, eq(userAccount.id, prescription.prescriberUserId))
+        .innerJoin(prescriptionItem, eq(prescriptionItem.prescriptionId, prescription.id))
+        .innerJoin(medication, eq(medication.id, prescriptionItem.medicationId))
+        .where(
+          and(eq(prescription.patientId, patientId), isNull(prescription.archivedAt)),
+        )
+        .orderBy(desc(prescription.signedAt));
 
       const notesWithVersions = [];
       for (const note of notes) {

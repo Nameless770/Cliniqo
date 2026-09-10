@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { Badge } from '@/components/ui';
@@ -64,6 +65,16 @@ export default async function PortalHomePage() {
           </button>
         </form>
       </header>
+
+      {/*
+        The way in to triage. Placed above booking on purpose: a patient who does not know
+        which service they need should meet this before the visit-type dropdown, not after
+        guessing at it.
+      */}
+      <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+        Not sure what to book?{' '}
+        <Link href="/portal/assistant">Describe your symptoms and get a suggestion</Link>.
+      </p>
 
       {/* --------------------------------------------------------- book */}
       <section

@@ -42,6 +42,8 @@ export type AuditEntityType =
   | 'patient_session'
   | 'clinic'
   | 'break_glass_grant'
+  | 'triage_conversation'
+  | 'triage_message'
   | 'audit_event';
 
 export type AuditInput = {

@@ -91,31 +91,32 @@ export async function readAuditLog(filters: AuditFilters): Promise<AuditPage> {
 
       const predicate = and(...where);
 
-      const [rows, [totals]] = await Promise.all([
-        tx
-          .select({
-            id: auditEvent.id,
-            occurredAt: auditEvent.occurredAt,
-            action: auditEvent.action,
-            outcome: auditEvent.outcome,
-            actorName: userAccount.fullName,
-            actorRoleCodes: auditEvent.actorRoleCodes,
-            subjectPatientId: auditEvent.subjectPatientId,
-            subjectPatientMrn: patient.mrn,
-            entityType: auditEvent.entityType,
-            entityId: auditEvent.entityId,
-            purpose: auditEvent.purpose,
-          })
-          .from(auditEvent)
-          // LEFT joins: an audit row must render even if its actor or subject is gone.
-          .leftJoin(userAccount, eq(userAccount.id, auditEvent.actorUserId))
-          .leftJoin(patient, eq(patient.id, auditEvent.subjectPatientId))
-          .where(predicate)
-          .orderBy(desc(auditEvent.occurredAt))
-          .limit(filters.pageSize)
-          .offset((filters.page - 1) * filters.pageSize),
-        tx.select({ value: count() }).from(auditEvent).where(predicate),
-      ]);
+      const rows = await tx
+        .select({
+          id: auditEvent.id,
+          occurredAt: auditEvent.occurredAt,
+          action: auditEvent.action,
+          outcome: auditEvent.outcome,
+          actorName: userAccount.fullName,
+          actorRoleCodes: auditEvent.actorRoleCodes,
+          subjectPatientId: auditEvent.subjectPatientId,
+          subjectPatientMrn: patient.mrn,
+          entityType: auditEvent.entityType,
+          entityId: auditEvent.entityId,
+          purpose: auditEvent.purpose,
+        })
+        .from(auditEvent)
+        // LEFT joins: an audit row must render even if its actor or subject is gone.
+        .leftJoin(userAccount, eq(userAccount.id, auditEvent.actorUserId))
+        .leftJoin(patient, eq(patient.id, auditEvent.subjectPatientId))
+        .where(predicate)
+        .orderBy(desc(auditEvent.occurredAt))
+        .limit(filters.pageSize)
+        .offset((filters.page - 1) * filters.pageSize);
+      const [totals] = await tx
+        .select({ value: count() })
+        .from(auditEvent)
+        .where(predicate);
 
       const total = totals?.value ?? 0;
 
@@ -142,18 +143,16 @@ export async function getAuditFilterOptions(): Promise<{
       metadata: { scope: 'audit_filter_options' },
     },
     async (tx, session) => {
-      const [actors, actions] = await Promise.all([
-        tx
-          .select({ id: userAccount.id, name: userAccount.fullName })
-          .from(userAccount)
-          .where(eq(userAccount.clinicId, session.clinicId))
-          .orderBy(asc(userAccount.fullName)),
-        tx
-          .selectDistinct({ action: auditEvent.action })
-          .from(auditEvent)
-          .where(eq(auditEvent.clinicId, session.clinicId))
-          .orderBy(asc(auditEvent.action)),
-      ]);
+      const actors = await tx
+        .select({ id: userAccount.id, name: userAccount.fullName })
+        .from(userAccount)
+        .where(eq(userAccount.clinicId, session.clinicId))
+        .orderBy(asc(userAccount.fullName));
+      const actions = await tx
+        .selectDistinct({ action: auditEvent.action })
+        .from(auditEvent)
+        .where(eq(auditEvent.clinicId, session.clinicId))
+        .orderBy(asc(auditEvent.action));
 
       return { actors, actions: actions.map((a) => a.action) };
     },
@@ -206,112 +205,99 @@ export async function getClinicOverview(
 
       const scalar = async (q: Promise<{ value: number }[]>) => (await q)[0]?.value ?? 0;
 
-      const [
-        activePatients,
-        activeStaff,
-        appointmentsToday,
-        checkedInNow,
-        completedToday,
-        noShowsToday,
-        unsignedNotes,
-        deniedLast24h,
-      ] = await Promise.all([
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(patient)
-            .where(and(eq(patient.clinicId, clinicId), isNull(patient.archivedAt))),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(userAccount)
-            .where(
-              and(
-                eq(userAccount.clinicId, clinicId),
-                eq(userAccount.status, 'active'),
-                isNull(userAccount.archivedAt),
-              ),
+      const activePatients = await scalar(
+        tx
+          .select({ value: count() })
+          .from(patient)
+          .where(and(eq(patient.clinicId, clinicId), isNull(patient.archivedAt))),
+      );
+      const activeStaff = await scalar(
+        tx
+          .select({ value: count() })
+          .from(userAccount)
+          .where(
+            and(
+              eq(userAccount.clinicId, clinicId),
+              eq(userAccount.status, 'active'),
+              isNull(userAccount.archivedAt),
             ),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(appointment)
-            .where(
-              and(
-                eq(appointment.clinicId, clinicId),
-                inDay,
-                isNull(appointment.archivedAt),
-              ),
+          ),
+      );
+      const appointmentsToday = await scalar(
+        tx
+          .select({ value: count() })
+          .from(appointment)
+          .where(
+            and(
+              eq(appointment.clinicId, clinicId),
+              inDay,
+              isNull(appointment.archivedAt),
             ),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(appointment)
-            .where(
-              and(
-                eq(appointment.clinicId, clinicId),
-                inDay,
-                eq(appointment.status, 'checked_in'),
-              ),
+          ),
+      );
+      const checkedInNow = await scalar(
+        tx
+          .select({ value: count() })
+          .from(appointment)
+          .where(
+            and(
+              eq(appointment.clinicId, clinicId),
+              inDay,
+              eq(appointment.status, 'checked_in'),
             ),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(appointment)
-            .where(
-              and(
-                eq(appointment.clinicId, clinicId),
-                inDay,
-                eq(appointment.status, 'completed'),
-              ),
+          ),
+      );
+      const completedToday = await scalar(
+        tx
+          .select({ value: count() })
+          .from(appointment)
+          .where(
+            and(
+              eq(appointment.clinicId, clinicId),
+              inDay,
+              eq(appointment.status, 'completed'),
             ),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(appointment)
-            .where(
-              and(
-                eq(appointment.clinicId, clinicId),
-                inDay,
-                eq(appointment.status, 'no_show'),
-              ),
+          ),
+      );
+      const noShowsToday = await scalar(
+        tx
+          .select({ value: count() })
+          .from(appointment)
+          .where(
+            and(
+              eq(appointment.clinicId, clinicId),
+              inDay,
+              eq(appointment.status, 'no_show'),
             ),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(visitNote)
-            .where(
-              and(
-                eq(visitNote.clinicId, clinicId),
-                eq(visitNote.status, 'draft'),
-                isNull(visitNote.archivedAt),
-              ),
+          ),
+      );
+      const unsignedNotes = await scalar(
+        tx
+          .select({ value: count() })
+          .from(visitNote)
+          .where(
+            and(
+              eq(visitNote.clinicId, clinicId),
+              eq(visitNote.status, 'draft'),
+              isNull(visitNote.archivedAt),
             ),
-        ),
-        scalar(
-          tx
-            .select({ value: count() })
-            .from(auditEvent)
-            .where(
-              and(
-                eq(auditEvent.clinicId, clinicId),
-                eq(auditEvent.outcome, 'denied'),
-                sql`${auditEvent.occurredAt} > now() - interval '24 hours'`,
-              ),
+          ),
+      );
+      const deniedLast24h = await scalar(
+        tx
+          .select({ value: count() })
+          .from(auditEvent)
+          .where(
+            and(
+              eq(auditEvent.clinicId, clinicId),
+              eq(auditEvent.outcome, 'denied'),
+              sql`${auditEvent.occurredAt} > now() - interval '24 hours'`,
             ),
-        ),
-      ]);
+          ),
+      );
 
-      const [heavy, breakGlassPending] = await Promise.all([
-        bulkReaders(clinicId),
-        pendingBreakGlassCount(clinicId),
-      ]);
+      const heavy = await bulkReaders(clinicId);
+      const breakGlassPending = await pendingBreakGlassCount(clinicId);
 
       return {
         activePatients,

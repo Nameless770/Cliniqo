@@ -185,37 +185,34 @@ export async function getPatient(patientId: string): Promise<PatientView | null>
       }
 
       // Only issued for clinical readers. A receptionist's request never runs these.
-      const [allergies, flags] = await Promise.all([
-        tx
-          .select({
-            id: patientAllergy.id,
-            allergenType: patientAllergy.allergenType,
-            allergenName: patientAllergy.allergenName,
-            reaction: patientAllergy.reaction,
-            severity: patientAllergy.severity,
-            status: patientAllergy.status,
-          })
-          .from(patientAllergy)
-          .where(
-            and(
-              eq(patientAllergy.patientId, patientId),
-              eq(patientAllergy.status, 'active'),
-              isNull(patientAllergy.archivedAt),
-            ),
+      const allergies = await tx
+        .select({
+          id: patientAllergy.id,
+          allergenType: patientAllergy.allergenType,
+          allergenName: patientAllergy.allergenName,
+          reaction: patientAllergy.reaction,
+          severity: patientAllergy.severity,
+          status: patientAllergy.status,
+        })
+        .from(patientAllergy)
+        .where(
+          and(
+            eq(patientAllergy.patientId, patientId),
+            eq(patientAllergy.status, 'active'),
+            isNull(patientAllergy.archivedAt),
           ),
-        tx
-          .select({
-            id: patientFlag.id,
-            flagType: patientFlag.flagType,
-            label: patientFlag.label,
-            detail: patientFlag.detail,
-            severity: patientFlag.severity,
-          })
-          .from(patientFlag)
-          .where(
-            and(eq(patientFlag.patientId, patientId), isNull(patientFlag.archivedAt)),
-          ),
-      ]);
+        );
+
+      const flags = await tx
+        .select({
+          id: patientFlag.id,
+          flagType: patientFlag.flagType,
+          label: patientFlag.label,
+          detail: patientFlag.detail,
+          severity: patientFlag.severity,
+        })
+        .from(patientFlag)
+        .where(and(eq(patientFlag.patientId, patientId), isNull(patientFlag.archivedAt)));
 
       return {
         scope: 'full',
@@ -278,31 +275,26 @@ export async function searchPatients(input: PatientSearchInput): Promise<Patient
 
       const where = and(...filters);
 
-      const [rows, [totals]] = await Promise.all([
-        tx
-          .select({
-            id: patient.id,
-            mrn: patient.mrn,
-            legalFirstName: patient.legalFirstName,
-            legalLastName: patient.legalLastName,
-            preferredName: patient.preferredName,
-            dateOfBirth: patient.dateOfBirth,
-            phonePrimary: patient.phonePrimary,
-            archivedAt: patient.archivedAt,
-          })
-          .from(patient)
-          .where(where)
-          // `id` is the tiebreaker. Without a total order, OFFSET paging can repeat one
-          // patient across pages and skip another when two share a name.
-          .orderBy(
-            asc(patient.legalLastName),
-            asc(patient.legalFirstName),
-            asc(patient.id),
-          )
-          .limit(input.pageSize)
-          .offset((input.page - 1) * input.pageSize),
-        tx.select({ value: count() }).from(patient).where(where),
-      ]);
+      const rows = await tx
+        .select({
+          id: patient.id,
+          mrn: patient.mrn,
+          legalFirstName: patient.legalFirstName,
+          legalLastName: patient.legalLastName,
+          preferredName: patient.preferredName,
+          dateOfBirth: patient.dateOfBirth,
+          phonePrimary: patient.phonePrimary,
+          archivedAt: patient.archivedAt,
+        })
+        .from(patient)
+        .where(where)
+        // `id` is the tiebreaker. Without a total order, OFFSET paging can repeat one
+        // patient across pages and skip another when two share a name.
+        .orderBy(asc(patient.legalLastName), asc(patient.legalFirstName), asc(patient.id))
+        .limit(input.pageSize)
+        .offset((input.page - 1) * input.pageSize);
+
+      const [totals] = await tx.select({ value: count() }).from(patient).where(where);
 
       const total = totals?.value ?? 0;
 

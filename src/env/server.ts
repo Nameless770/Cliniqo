@@ -107,6 +107,56 @@ const schema = z
      * Guarded so the seeder can never be triggered against a production database.
      */
     ALLOW_SEED_DATA: booleanish.default(false),
+
+    /* --- Symptom triage --------------------------------------------------- */
+    /**
+     * Which engine answers a patient's symptom description.
+     *
+     * `local` is the default and makes no network call: the symptom text never leaves
+     * this process. `openai` sends it to a third party, which is a disclosure of PHI and
+     * is gated below.
+     */
+    TRIAGE_ENGINE: z.enum(['local', 'openai']).default('local'),
+
+    OPENAI_API_KEY: z.string().min(1).optional(),
+    OPENAI_MODEL: z.string().min(1).default('gpt-4o-mini'),
+
+    /**
+     * The operator asserting that a Business Associate Agreement covers the model vendor.
+     *
+     * A flag rather than a comment because the alternative is a code review catching it,
+     * and code reviews do not run at 2am when somebody sets an API key to test something.
+     * OpenAI signs a BAA for API use on eligible plans with zero data retention; the FREE
+     * tier is not eligible and trains on submitted data, so a free key here is precisely
+     * the configuration this exists to keep away from real patients.
+     */
+    TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED: booleanish.default(false),
+  })
+  /* --- Configuration coherence, every environment -------------------------- */
+  .superRefine((env, ctx) => {
+    if (env.TRIAGE_ENGINE === 'openai' && !env.OPENAI_API_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OPENAI_API_KEY'],
+        message: 'OPENAI_API_KEY is required when TRIAGE_ENGINE=openai.',
+      });
+    }
+
+    /*
+     * Deliberately NOT production-only. A staging deployment pointed at a free-tier key
+     * is still sending somebody's symptoms to a vendor that trains on them, and staging
+     * is where real data most often leaks in.
+     */
+    if (env.TRIAGE_ENGINE === 'openai' && !env.TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED'],
+        message:
+          'TRIAGE_ENGINE=openai discloses patient symptom text to a third party. Set ' +
+          'TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED=true only when a BAA covers the vendor — ' +
+          'OpenAI does not offer one on the free tier.',
+      });
+    }
   })
   /* --- Production-only invariants ----------------------------------------- */
   .superRefine((env, ctx) => {

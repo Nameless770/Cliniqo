@@ -15,4 +15,5 @@ export * from './patient';
 export * from './scheduling';
 export * from './clinical';
 export * from './prescribing';
+export * from './triage';
 export * from './audit';
