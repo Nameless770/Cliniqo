@@ -38,7 +38,7 @@ import {
   listMyAppointments,
   rescheduleMyAppointment,
 } from '@/server/portal/data';
-import { zonedDayRange } from '@/lib/clinic-time';
+import { todayInZone, zonedDayRange } from '@/lib/clinic-time';
 
 /**
  * Patient portal, through the real audited path.
@@ -299,9 +299,20 @@ describe('patient portal booking and scoping', () => {
     it("offers only times inside the clinician's published availability", async () => {
       const before = await getOpenSlots(base.appointmentTypeId);
       expect(before.ok).toBe(true);
-      // With wide-open clinic hours and no published availability, times run all day.
-      const wideOpen = before.ok ? before.providers[0]?.days[0]?.slots ?? [] : [];
-      expect(wideOpen.some((s) => s.label < '09:00')).toBe(true);
+
+      /*
+       * A day that is not TODAY. Slots already in the past are filtered out, so today's
+       * openings depend on the wall clock when the suite runs — this assertion passed at
+       * 09:00 local and failed at 16:00, which is a test measuring the time of day rather
+       * than the code. Any later day is wholly in the future and therefore deterministic.
+       */
+      const today = todayInZone('America/New_York');
+      const futureDay = before.ok
+        ? before.providers[0]?.days.find((d) => d.date !== today)
+        : undefined;
+      expect(futureDay).toBeDefined();
+      // Wide-open clinic hours and no published availability: times run all day.
+      expect(futureDay!.slots.some((s) => s.label < '09:00')).toBe(true);
 
       const owner = await ownerPool.connect();
       try {

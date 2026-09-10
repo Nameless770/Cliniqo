@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
+import { clientEnv } from '@/env/client';
 import { getSession } from '@/server/auth/session';
 
 import { LoginForm } from './LoginForm';
@@ -12,6 +13,8 @@ import { LoginForm } from './LoginForm';
  * accounts are created by an administrator (phase 8), which is what keeps
  * §164.312(a)(2)(i) — one account per identified human — enforceable.
  */
+const appName = clientEnv.NEXT_PUBLIC_APP_NAME;
+
 export const metadata = { title: 'Sign in · Cliniqo' };
 
 export default async function LoginPage() {
@@ -20,9 +23,37 @@ export default async function LoginPage() {
 
   return (
     <section style={{ maxWidth: '22rem', width: '100%' }}>
+      {/*
+        The study's nameplate: the mark, a short heavy rule, then the heading. The rule
+        is the load-bearing part — it is what makes the wordmark read as a masthead
+        rather than as a logo, and it is the same device the app shell carries.
+
+        No clinic name above it, unlike the study, which sets one: this page is reached
+        before any session exists and nothing maps an anonymous request to a clinic
+        while multi-tenancy is undecided.
+      */}
       <div style={{ marginBottom: 'var(--space-6)' }}>
-        <h1 style={{ fontSize: 'var(--text-xl)', marginBottom: 'var(--space-1)' }}>
-          Sign in to Cliniqo
+        <div
+          style={{
+            fontSize: 'var(--text-2xl)',
+            fontWeight: 'var(--weight-semibold)',
+            letterSpacing: 'var(--tracking-tight)',
+            lineHeight: 1,
+          }}
+        >
+          {appName}
+        </div>
+        <div
+          aria-hidden="true"
+          style={{
+            width: '52px',
+            height: '2px',
+            background: 'var(--text-primary)',
+            margin: 'var(--space-3) 0 var(--space-5)',
+          }}
+        />
+        <h1 style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-1)' }}>
+          Sign in
         </h1>
         <p
           style={{

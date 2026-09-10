@@ -1,161 +1,215 @@
 /*
- * Cliniqo design tokens — Notion-inspired refresh
- * ================================================
+ * Cliniqo design tokens — "Broadsheet"
+ * ====================================
  *
- * The visual language adopts Notion's product aesthetic: a signature purple primary
- * ("iris"), warm off-white surfaces over pure grey, a warm-charcoal ink, hairline
- * borders, 8px buttons and 12px cards, and a set of pastel accent tints echoing the
- * colourful database properties of that product. Applied to Cliniqo's own surfaces — the
- * language, not the brand.
+ * Ported from the Claude Design study `Cliniqo Web.dc.html` and its design system
+ * `_ds/broadsheet-815cd7ee.../styles.css`. The language is a printed broadsheet: a warm
+ * paper ground, ink-black rules that actually read as rules, near-square corners (2px),
+ * a serif for everything including UI, and two process inks — cyan and magenta — doing
+ * all the accent work.
  *
- * Rules this file still follows, unchanged from before, because they are not stylistic:
+ * Only this file changed to reskin the application. Nothing outside it references a
+ * palette value; every component reads the semantic layer below, which is why the whole
+ * product moves at once and why the source system could be swapped again tomorrow.
  *
- * 1. Neutrals are WARM. Pure grey + white reads like a spreadsheet; staff look at these
- *    screens for eight-hour shifts. Notion's own neutrals are warm for the same reason.
+ * ---------------------------------------------------------------------------
+ * THREE PLACES THIS DEVIATES FROM THE SOURCE, AND WHY
+ * ---------------------------------------------------------------------------
  *
+ * 1. THE PRIMARY BUTTON IS DARKER THAN THE SOURCE'S.
+ *    Broadsheet's `.btn-primary` is `background: var(--color-accent) (#0088b0);
+ *    color: var(--color-bg) (#f3f2f2)` — which measures 3.65:1. Its label is 14px, so
+ *    the bar is 4.5:1 and the design as drawn fails it. `--brand-solid` therefore takes
+ *    accent-700 #006786 (5.72:1). That is not an invented colour: it is the same ink the
+ *    system already uses for links, so the substitution stays inside the palette. On a
+ *    screen where the primary button confirms a booking or signs a note, an unreadable
+ *    label is not a stylistic matter.
+ *
+ * 2. SUCCESS AND WARNING ARE DERIVED, BECAUSE THE SOURCE HAS NEITHER.
+ *    Broadsheet is a two-ink system: cyan and magenta, plus a process yellow it
+ *    explicitly reserves for print treatments ("body copy and chrome never take it").
+ *    Cliniqo has four status roles and they carry clinical meaning — a completed visit,
+ *    a no-show, a cancellation, a severe allergy. Collapsing success into the cyan that
+ *    already means "information" would make the schedule board ambiguous.
+ *    So the missing two are mixed the way a press would mix them: cyan over yellow for
+ *    green, magenta over yellow for amber. New hues, but the system's own grammar.
+ *
+ * 3. NO WEBFONT.
+ *    Broadsheet's stylesheet opens with `@import url('https://fonts.googleapis.com/...')`
+ *    for Source Serif 4. Importing it would mean every page rendering a patient chart
+ *    also calls Google, handing over the patient's IP and the referring URL — a
+ *    third-party disclosure with no BAA behind it, and a hole in the `font-src 'self'`
+ *    CSP that middleware.ts sets deliberately. The stack below asks for Source Serif 4
+ *    first (it is used where installed) and otherwise falls through to Georgia, which is
+ *    the fallback the design file itself declares. See the note on the stack.
+ *
+ * ---------------------------------------------------------------------------
+ * RULES THAT SURVIVE ANY RESKIN
+ * ---------------------------------------------------------------------------
+ *
+ * 1. Neutrals are WARM. Staff read these screens for eight-hour shifts.
  * 2. Every foreground/background pair used for text meets WCAG AA (4.5:1 body, 3:1 for
  *    large text and UI boundaries) in BOTH themes — verified by scripts/check-contrast.js.
- *    Where Notion's own hairline borders would fail the 3:1 control boundary, the darker,
- *    findable border wins: an input edge you cannot see is a control you cannot use.
- *
  * 3. Status is never colour alone. Every status token is paired with an icon or a text
- *    label in the component that uses it.
+ *    label in the component that uses it — which is also what keeps deviation 2 honest.
  */
 
 :root {
   color-scheme: light;
 
   /* ---------------------------------------------------------------- palette */
-  /* Iris — signature purple primary (Notion's "Get Notion free" purple) */
-  --iris-50: #f1edfc;
-  --iris-100: #e6e0f5; /* Notion lavender tint */
-  --iris-200: #d6c9f4;
-  --iris-300: #b3a4f5;
-  --iris-400: #8a72ed;
-  --iris-500: #6b58e0;
-  --iris-600: #5645d4; /* primary */
-  --iris-700: #4534b3; /* pressed */
-  --iris-800: #3a2a99; /* deep */
-  --iris-900: #2a1d6e;
 
-  /* Warm neutrals — Notion's charcoal/stone family */
-  --sand-0: #ffffff; /* canvas */
-  --sand-25: #fafaf9; /* surface-soft */
-  --sand-50: #f6f5f4; /* surface */
-  --sand-100: #f0eeec; /* sunken / neutral tint */
-  --sand-200: #e5e3df; /* hairline */
-  --sand-300: #c8c4be; /* strong hairline */
-  --sand-400: #a4a097; /* stone */
-  --sand-500: #8a867e;
-  --sand-600: #6b6961; /* muted text floor for AA */
-  --sand-700: #565349;
-  --sand-800: #37352f; /* Notion signature warm charcoal */
-  --sand-900: #211f1b; /* warm ink — primary text */
-  --sand-950: #131210;
+  /* Paper and ink — the ground the whole system is printed on. */
+  --paper: #f3f2f2; /* the sheet */
+  --paper-toned: #eae9e9; /* a toned box on the sheet */
+  --paper-deep: #dcdad8; /* the darker stock behind everything */
+  --paper-hover: #e4e2e1; /* the sheet, thumbed */
+  --ink: #201e1d; /* full-strength ink: rules, borders, body */
+  --ink-secondary: #413f3d;
+  --ink-muted: #5a5654;
 
-  /* Navy — dark hero/chrome accent and the night-theme ground */
-  --navy-900: #070f24;
-  --navy-800: #0a1530;
-  --navy-700: #101d3d;
-  --navy-600: #1a2a52;
-  --navy-500: #223461;
+  /* Neutral ramp — Broadsheet's own, generated in OKLCH on one lightness scale. */
+  --neutral-100: #f8f4f4;
+  --neutral-200: #eae7e7;
+  --neutral-300: #d7d3d3;
+  --neutral-400: #bab6b6;
+  --neutral-500: #9b9797;
+  --neutral-600: #7d7979;
+  --neutral-700: #605d5d;
+  --neutral-800: #444141;
+  --neutral-900: #2d2b2b;
 
-  /* Link blue — inline links, a DISTINCT role from the purple CTA */
-  --link-blue: #0075de;
-  --link-blue-pressed: #005bab;
+  /* Cyan — the first process ink. Links, focus, the primary action. */
+  --accent-100: #e9f8ff;
+  --accent-200: #cbeeff;
+  --accent-300: #99e0ff;
+  --accent-400: #62c5ee;
+  --accent-500: #38a6cf;
+  --accent-600: #1186ac;
+  --accent-700: #006786;
+  --accent-800: #004961;
+  --accent-900: #0a303e;
 
-  /* Pastel accent tints — feature/status backgrounds */
-  --tint-peach: #ffe8d4;
-  --tint-rose: #fde0ec;
-  --tint-mint: #d9f3e1;
-  --tint-lavender: #e6e0f5;
-  --tint-sky: #dcecfa;
-  --tint-yellow: #fef7d6;
-  --tint-red: #fde4e0;
+  /* Magenta — the second process ink. Alerts, cancellations, anything urgent. */
+  --accent-2-100: #fff1f4;
+  --accent-2-200: #ffdee6;
+  --accent-2-300: #ffc0d0;
+  --accent-2-400: #ff90b1;
+  --accent-2-500: #ff458e;
+  --accent-2-600: #d82071;
+  --accent-2-700: #aa0b56;
+  --accent-2-800: #790e3d;
+  --accent-2-900: #4b1528;
 
-  /* Functional text shades, dark enough to pass AA on their pale tints */
-  --success-text-l: #176c2b;
-  --warn-text-l: #7a3e00;
-  --danger-text-l: #a5231b;
-  --info-text-l: #005bab;
+  /*
+   * The mixed inks — see deviation 2. Cyan laid over yellow gives the green; magenta
+   * over yellow gives the amber. Kept in the same muted press register as the ramps
+   * above so they read as part of the same run rather than as UI chrome bolted on.
+   */
+  --press-green-200: #cfe9d5;
+  --press-green-800: #0f4626;
+  --press-amber-200: #f7e2c4;
+  --press-amber-800: #5f3400;
 
   /* ------------------------------------------------------------- semantic */
-  --bg-page: var(--sand-50);
-  --bg-surface: var(--sand-0);
-  --bg-raised: var(--sand-0);
-  --bg-sunken: var(--sand-100);
-  --bg-hover: var(--sand-100);
-  --bg-active: var(--sand-200);
-  --bg-overlay: rgb(10 21 48 / 45%);
 
-  --text-primary: var(--sand-900);
-  --text-secondary: var(--sand-700);
-  --text-muted: var(--sand-600);
-  --text-inverse: var(--sand-0);
-  --text-brand: var(--iris-600);
+  /*
+   * Note the inversion from the previous system: the SURFACE is darker than the PAGE.
+   * On paper a panel is a toned box printed onto the sheet, not a white card floating
+   * above it — so cards sit down into the page rather than lifting off it, and anything
+   * nested inside a card goes back to bare paper (--bg-raised).
+   */
+  --bg-page: var(--paper);
+  --bg-surface: var(--paper-toned);
+  --bg-raised: var(--paper);
+  --bg-sunken: var(--paper-deep);
+  --bg-hover: var(--paper-hover);
+  --bg-active: var(--neutral-300);
+  --bg-overlay: rgb(45 43 43 / 50%);
+
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-secondary);
+  --text-muted: var(--ink-muted);
+  --text-inverse: var(--paper);
+  --text-brand: var(--accent-700);
 
   /* subtle = decorative rules and dividers; no contrast minimum applies */
-  --border-subtle: var(--sand-200);
-  /* default = the visible edge of an input or control. WCAG 1.4.11 requires 3:1, so this
-     is deliberately darker than Notion's own hairline — a border you cannot find is a
-     control you cannot find. */
-  --border-default: var(--sand-500);
-  --border-strong: var(--sand-600);
+  --border-subtle: var(--neutral-300);
+  /*
+   * default = the visible edge of an input or control, and in this system that edge is
+   * full ink. The design draws every input as `1px solid #201e1d`; a broadsheet rule is
+   * meant to be seen. It clears WCAG 1.4.11's 3:1 by a mile, which is the happy case of
+   * a strong aesthetic and an accessibility floor pointing the same way.
+   */
+  --border-default: var(--ink);
+  --border-strong: var(--ink);
 
-  --brand-solid: var(--iris-600);
-  --brand-solid-hover: var(--iris-700);
-  --brand-solid-active: var(--iris-800);
-  --brand-soft: var(--iris-50);
-  --brand-text-on-solid: var(--sand-0);
+  --brand-solid: var(--accent-700); /* deviation 1 */
+  --brand-solid-hover: var(--accent-800);
+  --brand-solid-active: var(--accent-900);
+  --brand-soft: var(--accent-100);
+  --brand-text-on-solid: var(--paper);
 
-  --status-success-text: var(--success-text-l);
-  --status-success-bg: var(--tint-mint);
-  --status-warn-text: var(--warn-text-l);
-  --status-warn-bg: var(--tint-peach);
-  --status-danger-text: var(--danger-text-l);
-  --status-danger-bg: var(--tint-red);
-  --status-info-text: var(--info-text-l);
-  --status-info-bg: var(--tint-sky);
+  --status-success-text: var(--press-green-800);
+  --status-success-bg: var(--press-green-200);
+  --status-warn-text: var(--press-amber-800);
+  --status-warn-bg: var(--press-amber-200);
+  --status-danger-text: var(--accent-2-800);
+  --status-danger-bg: var(--accent-2-200);
+  --status-info-text: var(--accent-800);
+  --status-info-bg: var(--accent-200);
 
-  --focus-ring: var(--iris-600);
+  --focus-ring: var(--accent-700);
   --focus-ring-offset: var(--bg-surface);
 
   /* ---------------------------------------------------------- typography */
   /*
-   * Inter-fronted system stack — no webfont.
+   * A serif, for everything — including buttons, labels and table headers.
    *
-   * Notion ships a custom Inter-based face; we front the stack with Inter so it is used
-   * where installed, then fall back to the platform UI sans. Loading a font from a
-   * third-party CDN would mean every page rendering a patient chart also calls a vendor
-   * with no BAA, so nothing is fetched — the humanist-geometric character comes from
-   * Inter or the system UI font, whichever the machine already has.
+   * That is the loudest thing about this system and the least negotiable: Broadsheet
+   * sets `--font-heading` and `--font-body` to the same face on purpose. Take the serif
+   * out of the UI chrome and nothing else here reads as print.
+   *
+   * Source Serif 4 is asked for first and used wherever it is installed; otherwise the
+   * stack lands on Georgia, which is the exact fallback the design file declares
+   * (`font-family:"Source Serif 4",Georgia,serif`). Nothing is fetched — see deviation 3.
+   * Self-hosting the face is the one way to get full fidelity without a third-party
+   * call, and it is a deliberate decision to make, not one to slip into a token file:
+   * it means adding font binaries to the repository.
    */
   --font-sans:
-    'Inter', 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+    'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', 'Liberation Serif',
+    serif;
   --font-mono:
     ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'SF Mono', Menlo, Consolas, monospace;
 
+  /*
+   * Broadsheet sets a 15px body and steps its headings 13/16/20/25/32/42. Cliniqo's
+   * screens are denser than the design study's marketing-weight pages, so the small end
+   * keeps Cliniqo's own sizes and the large end takes the source's scale, where the
+   * serif's display character actually shows.
+   */
   --text-2xs: 0.6875rem; /* 11px — dense table metadata only */
   --text-xs: 0.75rem; /* 12px */
   --text-sm: 0.8125rem; /* 13px — table body */
   --text-base: 0.875rem; /* 14px — UI default; clinical tools are dense */
   --text-md: 1rem; /* 16px — prose, note bodies */
-  --text-lg: 1.125rem;
-  --text-xl: 1.375rem;
-  --text-2xl: 1.75rem;
+  --text-lg: 1.1875rem; /* 19px */
+  --text-xl: 1.5625rem; /* 25px */
+  --text-2xl: 2rem; /* 32px */
 
-  /* Notion tracks large type tighter and body slightly open. */
-  --tracking-tight: -0.02em;
-  --tracking-snug: -0.01em;
+  /* The source tracks display type tight (-0.02em) and leaves body alone. */
+  --tracking-tight: -0.025em;
+  --tracking-snug: -0.015em;
   --tracking-normal: 0;
 
-  --leading-tight: 1.2;
-  --leading-normal: 1.5;
+  --leading-tight: 1.12;
+  --leading-normal: 1.55;
   --leading-relaxed: 1.65; /* note bodies — long-form clinical text */
 
+  /* The serif carries emphasis at 600; there is no 500 in the family's usable range. */
   --weight-normal: 400;
-  --weight-medium: 500;
+  --weight-medium: 600;
   --weight-semibold: 600;
 
   /* ------------------------------------------------------------- spacing */
@@ -173,21 +227,24 @@
   --space-16: 4rem;
 
   /* --------------------------------------------------------------- shape */
-  /* Notion geometry: 8px buttons/inputs, 12px cards, full only for pills/badges. */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 999px;
+  /*
+   * Near-square. Broadsheet's radii are 1/2/4px — paper does not have rounded corners,
+   * and the 12px cards of the previous system would fight every rule on the page.
+   */
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-full: 999px; /* pills and avatars only */
 
-  /* Soft, diffuse elevation in Notion's grey-ink rather than pure black. */
-  --shadow-sm: 0 1px 2px rgb(15 15 15 / 6%);
-  --shadow-md: 0 4px 12px rgb(15 15 15 / 8%);
-  --shadow-lg: 0 24px 48px -8px rgb(15 15 15 / 18%), 0 2px 6px rgb(15 15 15 / 6%);
+  /* Ink-tinted elevation, from the source's own derivation. */
+  --shadow-sm: 0 1px 2px rgb(45 43 43 / 14%);
+  --shadow-md: 0 3px 10px rgb(45 43 43 / 16%);
+  --shadow-lg: 0 12px 32px rgb(45 43 43 / 22%);
 
   /* --------------------------------------------------------------- other */
   --shell-topbar-height: 3.25rem;
-  --shell-nav-width: 13.5rem;
+  --shell-nav-width: 14.75rem; /* the study's 236px sidebar */
   --content-max-width: 82rem;
 
   --duration-fast: 100ms;
@@ -200,54 +257,58 @@
 }
 
 /*
- * Dark theme.
+ * Dark theme — the night press.
  *
- * The night ground takes Notion's deep navy rather than a neutral black, so a shift
- * worked after dark still reads as the same brand. Only the semantic layer flips; the
- * palette scales stay put, so a component never needs to know which theme it is in.
+ * The design study is light-only: it is a printed sheet, and there is no such thing as a
+ * dark broadsheet. Dropping dark mode was the alternative, and it would have regressed
+ * anyone reading a chart on a night shift with their OS set dark. So the ground inverts
+ * to the system's own ink (#201e1d) with the paper becoming the type, and the cyan moves
+ * up its ramp to stay legible on it. Only the semantic layer flips; the palette scales
+ * stay put, so no component knows which theme it is in.
  */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --bg-page: var(--navy-900);
-    --bg-surface: var(--navy-800);
-    --bg-raised: var(--navy-700);
-    --bg-sunken: #060c1d;
-    --bg-hover: var(--navy-700);
-    --bg-active: var(--navy-600);
-    --bg-overlay: rgb(3 7 18 / 70%);
+    --bg-page: var(--ink);
+    --bg-surface: var(--neutral-900);
+    --bg-raised: var(--neutral-800);
+    --bg-sunken: #171615;
+    --bg-hover: #383534;
+    --bg-active: var(--neutral-800);
+    --bg-overlay: rgb(10 9 9 / 70%);
 
-    --text-primary: var(--sand-50);
-    --text-secondary: var(--sand-300);
-    --text-muted: var(--sand-400);
-    --text-inverse: var(--navy-900);
-    --text-brand: var(--iris-300);
+    --text-primary: var(--paper);
+    --text-secondary: var(--neutral-300);
+    --text-muted: var(--neutral-400);
+    --text-inverse: var(--ink);
+    --text-brand: var(--accent-300);
 
-    --border-subtle: #1c2a49;
-    --border-default: #5b6a8a;
-    --border-strong: #74829e;
+    --border-subtle: var(--neutral-800);
+    /* Ink borders are invisible on an ink ground; the rule inverts to the paper end. */
+    --border-default: var(--neutral-500);
+    --border-strong: var(--neutral-400);
 
-    --brand-solid: var(--iris-500);
-    --brand-solid-hover: var(--iris-400);
-    --brand-solid-active: var(--iris-300);
-    --brand-soft: #1c1d4a;
-    --brand-text-on-solid: #ffffff;
+    --brand-solid: var(--accent-300);
+    --brand-solid-hover: var(--accent-200);
+    --brand-solid-active: var(--accent-100);
+    --brand-soft: var(--accent-900);
+    --brand-text-on-solid: var(--accent-900);
 
-    --status-success-text: #7fc785;
-    --status-success-bg: #10251a;
-    --status-warn-text: #e0a95f;
-    --status-warn-bg: #2a1c0b;
-    --status-danger-text: #f2938a;
-    --status-danger-bg: #2c1513;
-    --status-info-text: #7cb0f5;
-    --status-info-bg: #0f1f3d;
+    --status-success-text: #a8dcb5;
+    --status-success-bg: #12301f;
+    --status-warn-text: #e8c489;
+    --status-warn-bg: #33220a;
+    --status-danger-text: var(--accent-2-300);
+    --status-danger-bg: var(--accent-2-900);
+    --status-info-text: var(--accent-300);
+    --status-info-bg: var(--accent-900);
 
-    --focus-ring: var(--iris-400);
+    --focus-ring: var(--accent-400);
     --focus-ring-offset: var(--bg-surface);
 
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 45%);
-    --shadow-md: 0 4px 12px rgb(0 0 0 / 50%);
-    --shadow-lg: 0 24px 48px -8px rgb(0 0 0 / 60%), 0 2px 6px rgb(0 0 0 / 40%);
+    --shadow-md: 0 3px 10px rgb(0 0 0 / 50%);
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 60%);
   }
 }

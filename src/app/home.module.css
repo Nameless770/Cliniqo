@@ -1,0 +1,292 @@
+/*
+ * The public front door.
+ *
+ * A CSS Module rather than the inline styles used elsewhere in `app/`: this is the one
+ * page with hover states, focus rings on card-sized targets, and a layout that has to
+ * fold on a phone. None of those can be expressed as a style attribute, and a landing
+ * page that only works at desktop width is not a landing page.
+ *
+ * Colours come from the semantic tokens only, so the dark theme follows automatically and
+ * `npm run check:contrast` keeps covering every pair used here.
+ */
+
+.page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-page);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.wordmark {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+/*
+ * 24px minimum, per WCAG 2.2 target size (2.5.8). A `--text-sm` link is about 17px tall
+ * on its own line. The inline exception does not apply to the one in the header bar: it
+ * sits alone rather than inside a sentence, so it has to earn the height from padding.
+ */
+.barLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-1);
+  margin: 0 calc(var(--space-1) * -1);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.barLink:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  /* Not --content-max-width: that is the app shell's 82rem, sized for tables. Prose at
+     that measure is unreadable, so this page sets its own. */
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: var(--space-10) var(--space-5) var(--space-16);
+  display: grid;
+  gap: var(--space-10);
+  /*
+   * `flex: 1` above makes this taller than its content on a tall viewport, and a grid
+   * whose align-content is left at `normal` hands that slack to its auto rows — which
+   * then hand it down to every nested grid, so a one-line paragraph measured 84px tall
+   * inside an 20px line box. Pin the rows to their natural height and let the slack
+   * fall to the bottom of the page where it belongs.
+   */
+  align-content: start;
+}
+
+/* ------------------------------------------------------------------ hero */
+
+.hero {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 34rem;
+}
+
+/* The nameplate rule, matching the sign-in page and the shell's masthead. */
+.rule {
+  width: 52px;
+  height: 2px;
+  background: var(--text-primary);
+  margin: 0 0 var(--space-2);
+}
+
+.title {
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+
+.lede {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-relaxed);
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- doors */
+
+.doors {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 40rem) {
+  .doors {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/*
+ * Each door is one link covering the whole card, so the tap target is the card rather
+ * than four words inside it — which is what makes this usable on a phone, and what keeps
+ * a keyboard user to one stop per door instead of several.
+ */
+.door {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  padding: var(--space-5);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+
+.door:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+/* The ring itself comes from the global :focus-visible rule; only the radius is
+   overridden, so it traces the card's corners rather than the global small radius. */
+.door:focus-visible {
+  border-radius: var(--radius-lg);
+}
+
+.doorPrimary {
+  border-color: var(--brand-solid);
+}
+
+.doorTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-snug);
+}
+
+.doorBody {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--text-secondary);
+}
+
+.doorCta {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-brand);
+}
+
+.doorNote {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* ----------------------------------------------------------------- steps */
+
+.section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  letter-spacing: var(--tracking-snug);
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+@media (min-width: 48rem) {
+  .steps {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.step {
+  display: grid;
+  gap: var(--space-1);
+  counter-increment: step;
+}
+
+.step::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--bg-page);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.stepTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.stepBody {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------- emergency */
+
+.emergency {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--status-danger-bg);
+  color: var(--status-danger-text);
+}
+
+.emergencyTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.emergencyBody {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.footer {
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-5);
+}
+
+.footerInner {
+  width: 100%;
+  max-width: 56rem;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.footerInner p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .door {
+    transition: none;
+  }
+}
