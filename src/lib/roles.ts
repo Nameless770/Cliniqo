@@ -46,6 +46,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/schedule', label: 'Schedule', requires: 'appointment.read' },
   { href: '/patients', label: 'Patients', requires: 'patient.read.identifying' },
+  /* Scheduling, not clinical: the queue shows who needs seeing and how soon, and the
+     symptom text lives behind `patient.read.clinical` on the conversation page. */
+  { href: '/triage', label: 'Triage', requires: 'appointment.read' },
   // Clinical surfaces. Receptionists hold no clinical permission at all, so these vanish
   // for them without any role being named here - minimum necessary, 164.502(b).
   { href: '/notes', label: 'Visit notes', requires: 'note.read' },

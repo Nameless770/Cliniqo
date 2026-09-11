@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, count, eq, gt, sql } from 'drizzle-orm';
+import { and, count, eq, gt } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
 import { authAttempt } from '@/db/schema';
@@ -86,19 +86,12 @@ export async function recordAttempt(input: {
     });
 }
 
-/**
- * Prune old attempts.
+/*
+ * Pruning lives in src/server/maintenance/jobs.ts.
  *
- * This table is operational security telemetry, not an audit record: it holds no PHI and
- * lives on a 90-day clock rather than the audit log's six years. Keeping the two separate
- * is what stops brute-force noise from swamping the compliance log.
- *
- * Called from a scheduled job, not from the request path.
+ * It used to be a `pruneAuthAttempts` export here, and nothing ever called it — so the
+ * 90-day retention this table documents was never actually enforced. Moving it to the
+ * registered maintenance job put it on a schedule; leaving a copy behind would only
+ * recreate the drift.
  */
-export async function pruneAuthAttempts(): Promise<number> {
-  const result = await getDb()
-    .delete(authAttempt)
-    .where(sql`${authAttempt.attemptedAt} < now() - interval '90 days'`);
 
-  return result.rowCount ?? 0;
-}

@@ -139,8 +139,10 @@ jobs:
 
       # Rebuilds cliniqo_test from the checked-in migrations, then runs the suite:
       # audit append-only (including every partition's grants), concurrent double-booking,
-      # signed-note and prescription freezing, controlled-substance refusal.
-      - name: Database tests
+      # signed-note and prescription freezing, controlled-substance refusal — and the
+      # end-to-end journeys, which build the application and drive a real server through
+      # sign-in, role boundaries, symptom triage and the portal over HTTP.
+      - name: Database and end-to-end tests
         run: npm test
 
       # A suite that silently stops running still reports success. This fails the job if
@@ -150,7 +152,16 @@ jobs:
           set -euo pipefail
           count=$(grep -roE "\b(it|test)\(" tests --include=*.test.ts | wc -l)
           echo "Found $count test cases."
-          if [ "$count" -lt 15 ]; then
-            echo "::error::Expected at least 15 database tests, found $count."
+          if [ "$count" -lt 40 ]; then
+            echo "::error::Expected at least 40 test cases, found $count."
+            exit 1
+          fi
+          # The end-to-end journeys are the only coverage of middleware, cookies and
+          # the server-action round trip. A glob that stopped matching them would
+          # leave the rest of the suite green, so they are asserted separately.
+          e2e=$(grep -roE "\b(it|test)\(" tests/e2e --include=*.test.ts | wc -l)
+          echo "Found $e2e end-to-end journeys."
+          if [ "$e2e" -lt 8 ]; then
+            echo "::error::Expected at least 8 end-to-end journeys, found $e2e."
             exit 1
           fi

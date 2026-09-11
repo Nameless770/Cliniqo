@@ -207,6 +207,15 @@ export const triageStatus = pgEnum('triage_status', ['open', 'closed']);
 /** Who wrote a turn. Never a clinician: nothing here is clinical advice. */
 export const triageMessageRole = pgEnum('triage_message_role', ['patient', 'assistant']);
 
+/**
+ * How a maintenance run ended.
+ *
+ * `failed` is a first-class outcome rather than an absent row: a job that threw must leave
+ * evidence that it tried, or a silent failure looks identical to a job that was never
+ * scheduled — which is exactly how the prune function went two years without running.
+ */
+export const maintenanceOutcome = pgEnum('maintenance_outcome', ['succeeded', 'failed']);
+
 export const breakGlassReviewOutcome = pgEnum('break_glass_review_outcome', [
   'pending',
   'justified',

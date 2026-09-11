@@ -120,6 +120,13 @@
       "when": 1789076753906,
       "tag": "0016_short_baron_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789109249181,
+      "tag": "0017_solid_quicksilver",
+      "breakpoints": true
     }
   ]
 }

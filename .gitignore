@@ -21,3 +21,6 @@ next-env.d.ts
 .vscode/
 .idea/
 *.tsbuildinfo
+
+# End-to-end suite build output (see tests/e2e/server.ts).
+.next-e2e/

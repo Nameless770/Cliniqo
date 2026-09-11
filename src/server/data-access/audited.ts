@@ -298,8 +298,17 @@ async function auditedOperation<T>(
 export function auditedRead<T>(
   spec: AuditedSpec,
   work: (tx: Tx, session: ActiveSession) => Promise<T>,
+  /**
+   * Resolve the audit subject from the row that was read.
+   *
+   * For reads addressed by something other than a patient id — a conversation, a note, a
+   * prescription — where the subject is discovered by the query rather than known by the
+   * caller. Passing it in instead would mean the audit row records the patient the caller
+   * BELIEVED it was reading; resolving it from the result records the one it actually did.
+   */
+  subjectFrom?: (result: T) => string,
 ): Promise<T> {
-  return auditedOperation(spec, work);
+  return auditedOperation(spec, work, undefined, subjectFrom);
 }
 
 /**

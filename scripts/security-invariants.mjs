@@ -863,9 +863,7 @@ void randomUUID;
   );
 }
 
-/* --------------------------------------------------------------- report */
 
-const groups = [...new Set(results.map((r) => r.group))];
 /* ------------------------------------------------- Transaction concurrency */
 
 /*
@@ -1015,6 +1013,83 @@ const groups = [...new Set(results.map((r) => r.group))];
     !/metadata:\s*\{[^}]*(body|message|symptoms)\s*[,}]/.test(triageData),
   );
 }
+
+/* ------------------------------------------------------- Scheduled maintenance */
+
+/*
+ * A job that is not registered does not run.
+ *
+ * This is the precise shape of the bug the maintenance feature exists to fix:
+ * `pruneAuthAttempts` was written, documented a 90-day retention, and was called from
+ * nowhere — so the retention was never enforced and nothing said so. Writing a second job
+ * and forgetting to register it would reproduce that exactly, and silently.
+ */
+{
+  const jobs = read('src/server/maintenance/jobs.ts');
+  const runner = read('src/server/maintenance/run.ts');
+
+  const exported = [...jobs.matchAll(/export const (\w+): MaintenanceJob/g)].map((m) => m[1]);
+  const registryStart = jobs.indexOf('MAINTENANCE_JOBS: readonly MaintenanceJob[] = [');
+  const registry = jobs.slice(registryStart, jobs.indexOf('];', registryStart));
+
+  check(
+    'Scheduled maintenance',
+    `every exported job is registered (${exported.length} job(s))`,
+    exported.length > 0 && exported.every((name) => registry.includes(name)),
+  );
+
+  /*
+   * These jobs run daily holding the OWNER credential — the only code in the project that
+   * does. A DELETE or a DROP reaching audit_event would be a six-year compliance record
+   * disappearing on a schedule, so the file must contain neither.
+   */
+  check(
+    'Scheduled maintenance',
+    'no maintenance job deletes or drops audit data',
+    !/delete\s+from\s+audit/i.test(jobs) && !/\bdrop\s+(table|partition)\b/i.test(jobs),
+  );
+
+  /*
+   * The maintenance modules are loaded directly by `node` from scripts/maintenance.js,
+   * which resolves neither the project's `@/` alias nor its extensionless imports. A
+   * runtime import here would not fail a build or a test — it would fail at 3am in cron,
+   * which is the worst place to discover it.
+   */
+  const runtimeImports = (source) =>
+    [...source.matchAll(/^import\s+(?!type\b)/gm)].length;
+
+  check(
+    'Scheduled maintenance',
+    'the job modules carry no runtime imports (they run under plain node)',
+    runtimeImports(jobs) === 0 && runtimeImports(runner) === 0,
+  );
+
+  check(
+    'Scheduled maintenance',
+    'a failed job is recorded rather than only thrown',
+    runner.includes("outcome = 'failed'") && runner.includes('INSERT INTO maintenance_run'),
+  );
+
+  check(
+    'Scheduled maintenance',
+    'the run log is append-only for the application role',
+    /REVOKE\s+UPDATE,\s*DELETE,\s*TRUNCATE\s+ON\s+"maintenance_run"\s+FROM\s+cliniqo_app/i.test(
+      read('drizzle/0017_solid_quicksilver.sql'),
+    ),
+  );
+}
+
+/* --------------------------------------------------------------- report */
+
+/*
+ * Derived HERE, not earlier.
+ *
+ * It used to be computed further up, and every check block added below that point ran
+ * and counted but never printed its name — three groups went silent that way. A report
+ * that quietly omits a section is the same class of bug as a job that quietly never
+ * runs, which is what half of these invariants exist to catch.
+ */
+const groups = [...new Set(results.map((r) => r.group))];
 
 for (const g of groups) {
   console.log(`\n  ${g}`);

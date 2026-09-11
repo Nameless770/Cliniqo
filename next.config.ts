@@ -49,6 +49,16 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  /**
+   * Build output directory, overridable for the end-to-end suite.
+   *
+   * Those tests build and serve the application for real, and writing into the same
+   * `.next` a running `next dev` owns clobbers it mid-session — which happened, and cost
+   * a debugging detour. One environment variable keeps the two builds apart; nothing sets
+   * it in normal use, so the default is unchanged.
+   */
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+
   /** Do not advertise the framework version to attackers scanning for known CVEs. */
   poweredByHeader: false,
 

@@ -84,6 +84,10 @@ export const AUDIT_ACTIONS = [
   'triage.start',
   'triage.message',
   'triage.read',
+  /* The staff queue — one read spanning many patients. See COLLECTION_ACTIONS. */
+  'triage.search',
+  /* Staff marking a triage conversation dealt with. */
+  'triage.close',
 
   /* Emergency access — §164.312(a)(2)(ii). */
   'breakglass.grant',
@@ -133,6 +137,8 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'triage.start',
   'triage.message',
   'triage.read',
+  'triage.search',
+  'triage.close',
 ]);
 
 /**
@@ -152,4 +158,6 @@ export const COLLECTION_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'appointment.search',
   'note.search',
   'prescription.search',
+  /* The triage queue spans every patient who has described a symptom. */
+  'triage.search',
 ]);

@@ -9,7 +9,16 @@ import tseslint from 'typescript-eslint';
  */
 export default tseslint.config(
   {
-    ignores: ['.next/**', 'node_modules/**', 'drizzle/**', 'next-env.d.ts', 'scripts/**'],
+    ignores: [
+      '.next/**',
+      // The end-to-end suite builds here so it cannot clobber a running dev server's
+      // output; it is build artefacts either way, not source.
+      '.next-e2e/**',
+      'node_modules/**',
+      'drizzle/**',
+      'next-env.d.ts',
+      'scripts/**',
+    ],
   },
 
   ...nextCoreWebVitals,

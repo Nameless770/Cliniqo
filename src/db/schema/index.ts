@@ -17,3 +17,4 @@ export * from './clinical';
 export * from './prescribing';
 export * from './triage';
 export * from './audit';
+export * from './maintenance';
