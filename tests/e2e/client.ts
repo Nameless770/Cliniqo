@@ -141,6 +141,18 @@ export class BrowserSession {
       if (!location) break;
       const next = new URL(location, current.url || this.baseUrl).toString();
       trail.push(next);
+
+      /*
+       * Stop at the edge of the application.
+       *
+       * Two reasons, and the second is the serious one. A test that followed a redirect
+       * to accounts.google.com would make a real network call to Google — slow, flaky,
+       * and reaching outside the suite. And this jar sends its cookies by name with no
+       * domain check, so following off-origin would post the session cookie to somebody
+       * else's server. The destination is recorded in the trail, which is what the
+       * assertion actually needs.
+       */
+      if (new URL(next).origin !== new URL(this.baseUrl).origin) break;
       current = await fetch(next, {
         headers: { cookie: this.cookieHeader(), accept: 'text/html' },
         redirect: 'manual',

@@ -53,6 +53,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   // for them without any role being named here - minimum necessary, 164.502(b).
   { href: '/notes', label: 'Visit notes', requires: 'note.read' },
   { href: '/prescriptions', label: 'Prescriptions', requires: 'prescription.read' },
+  { href: '/billing', label: 'Billing', requires: 'billing.read' },
   // Administration.
   { href: '/staff', label: 'Staff', requires: 'staff.read' },
   { href: '/audit', label: 'Audit log', requires: 'audit.read' },

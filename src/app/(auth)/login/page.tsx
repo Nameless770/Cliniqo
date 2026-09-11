@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { clientEnv } from '@/env/client';
+import { googleConfig } from '@/server/auth/google';
 import { getSession } from '@/server/auth/session';
 
 import { LoginForm } from './LoginForm';
@@ -17,9 +18,17 @@ const appName = clientEnv.NEXT_PUBLIC_APP_NAME;
 
 export const metadata = { title: 'Sign in · Cliniqo' };
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   // Already signed in — don't show a login form to an authenticated user.
   if (await getSession()) redirect('/dashboard');
+
+  /* Null when Google sign-in is not configured, in which case nothing about it renders. */
+  const google = googleConfig();
+  const { error } = await searchParams;
 
   return (
     <section style={{ maxWidth: '22rem', width: '100%' }}>
@@ -66,7 +75,83 @@ export default async function LoginPage() {
         </p>
       </div>
 
+      {/*
+        One message for every SSO refusal — a bad handshake, an unverified address, the
+        wrong Workspace domain, no matching staff account. Telling them apart would make
+        this page an oracle for which addresses belong to clinic staff.
+      */}
+      {error === 'sso' ? (
+        <p
+          role="alert"
+          style={{
+            margin: '0 0 var(--space-4)',
+            padding: 'var(--space-2) var(--space-3)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--status-danger-bg)',
+            color: 'var(--status-danger-text)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          Could not sign you in with Google. Your clinic must have issued you an account
+          first — ask an administrator, or sign in with your password.
+        </p>
+      ) : null}
+
       <LoginForm />
+
+      {google ? (
+        <>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-3)',
+              margin: 'var(--space-5) 0',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--text-xs)',
+            }}
+          >
+            <span style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
+            or
+            <span style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
+          </div>
+
+          {/*
+            A real form POST, not a link. A GET would be triggerable by any prefetch or
+            <img> on any page, silently starting authentication flows.
+          */}
+          <form action="/auth/google/start" method="POST">
+            <button
+              type="submit"
+              style={{
+                width: '100%',
+                padding: 'var(--space-3)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                font: 'inherit',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 'var(--weight-medium)',
+                cursor: 'pointer',
+              }}
+            >
+              Sign in with Google
+            </button>
+          </form>
+
+          <p
+            style={{
+              margin: 'var(--space-2) 0 0',
+              fontSize: 'var(--text-xs)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            Only works for an account your clinic has already issued. Signing in with
+            Google never creates one.
+          </p>
+        </>
+      ) : null}
 
       <p
         style={{

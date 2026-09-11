@@ -183,6 +183,10 @@ export const auditEntityType = pgEnum('audit_entity_type', [
   'break_glass_grant',
   'triage_conversation',
   'triage_message',
+  'invoice',
+  'invoice_line',
+  'payment',
+  'user_identity',
   /* Reading the audit log is itself an audited event, and its object is the log. */
   'audit_event',
 ]);
@@ -214,6 +218,32 @@ export const triageMessageRole = pgEnum('triage_message_role', ['patient', 'assi
  * evidence that it tried, or a silent failure looks identical to a job that was never
  * scheduled — which is exactly how the prune function went two years without running.
  */
+/**
+ * Billing.
+ *
+ * `void` rather than a delete: an invoice that was sent to somebody is a fact, and the
+ * correction for a wrong one is a recorded reversal, not a disappearance. `paid` is
+ * derived from payments covering the total but stored explicitly, so the state a
+ * receptionist saw is the state the row records.
+ */
+/**
+ * Federated identity providers.
+ *
+ * An enum rather than free text so a typo cannot create a second, parallel "google"
+ * provider whose rows never match a lookup.
+ */
+export const identityProvider = pgEnum('identity_provider', ['google']);
+
+export const invoiceStatus = pgEnum('invoice_status', ['draft', 'issued', 'paid', 'void']);
+
+export const paymentMethod = pgEnum('payment_method', [
+  'cash',
+  'card',
+  'bank_transfer',
+  'insurance',
+  'other',
+]);
+
 export const maintenanceOutcome = pgEnum('maintenance_outcome', ['succeeded', 'failed']);
 
 export const breakGlassReviewOutcome = pgEnum('break_glass_review_outcome', [

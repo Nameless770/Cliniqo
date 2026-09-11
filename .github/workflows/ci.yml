@@ -142,6 +142,14 @@ jobs:
       # signed-note and prescription freezing, controlled-substance refusal — and the
       # end-to-end journeys, which build the application and drive a real server through
       # sign-in, role boundaries, symptom triage and the portal over HTTP.
+      # The permission matrix lives in two places: role_permission in the database, which
+      # is authoritative at runtime, and ROLE_PERMISSIONS in TypeScript, which drives the
+      # UI. Drift between them fails CLOSED and looks like a misconfiguration rather than
+      # a defect, so it is asserted on every run. It needs a database, which is why it is
+      # here and not in `npm run verify`.
+      - name: Permission matrix drift
+        run: npm run check:permissions
+
       - name: Database and end-to-end tests
         run: npm test
 

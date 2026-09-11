@@ -119,6 +119,7 @@ export default async function PatientProfilePage({
   const p = view.patient;
   const mayEdit = can(session.permissions, 'patient.update');
   const mayBook = can(session.permissions, 'appointment.create');
+  const mayBill = can(session.permissions, 'billing.create');
   const mayExport = can(session.permissions, 'patient.export');
   const mayAudit = can(session.permissions, 'audit.read');
   const mayBreakGlass = can(session.permissions, 'breakglass.use');
@@ -177,6 +178,22 @@ export default async function PatientProfilePage({
               }}
             >
               Book appointment
+            </Link>
+          ) : null}
+          {mayBill && !p.archivedAt ? (
+            <Link
+              href={`/patients/${id}/invoice/new`}
+              style={{
+                padding: 'var(--space-2) var(--space-4)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                textDecoration: 'none',
+                fontSize: 'var(--text-sm)',
+              }}
+            >
+              New invoice
             </Link>
           ) : null}
           {mayEdit && !p.archivedAt ? (

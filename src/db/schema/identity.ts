@@ -22,7 +22,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { clinic } from './clinic';
-import { roleCode, sessionRevokedReason, userStatus } from './enums';
+import { identityProvider, roleCode, sessionRevokedReason, userStatus } from './enums';
 import { citext, primaryId, rowVersion, softDelete, timestamps } from './shared';
 
 /* -------------------------------------------------------------------------- */
@@ -309,5 +309,58 @@ export const authAttempt = pgTable(
      */
     index('auth_attempt_email_time_idx').on(t.emailAttempted, t.attemptedAt.desc()),
     index('auth_attempt_ip_time_idx').on(t.ipAddress, t.attemptedAt.desc()),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A federated identity linked to a staff account — "sign in with Google".
+ *
+ * ==========================================================================
+ * LINKING, NEVER CREATION
+ * ==========================================================================
+ *
+ * A row here always points at a `user_account` an administrator already created. Google
+ * proves WHO is at the keyboard; it does not decide who may have an account. If a
+ * successful Google sign-in could create one, then anyone with a Google address could
+ * mint themselves a staff login, and §164.312(a)(2)(i) — one identified human per account,
+ * issued deliberately — would be decided by an external directory rather than by the
+ * clinic.
+ *
+ * The subject is Google's stable `sub`, never the email. Email addresses get reassigned
+ * when staff leave, and a departing employee's address handed to their replacement would
+ * silently hand over the account with it. `sub` never changes and is never reused.
+ *
+ * NOTHING SECRET IS STORED. No tokens, no refresh tokens: the authorization code is
+ * exchanged, the identity read, and the credential discarded within the request. This
+ * application does not act on anyone's behalf at Google, so keeping a token would be
+ * holding a key it has no lock for.
+ */
+export const userIdentity = pgTable(
+  'user_identity',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id),
+
+    provider: identityProvider('provider').notNull(),
+    /** The provider's immutable subject identifier. Never the email. */
+    subject: text('subject').notNull(),
+
+    /** What the provider asserted at link time — for display and support, not for lookup. */
+    emailAtLink: citext('email_at_link').notNull(),
+
+    linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+
+    ...timestamps(),
+  },
+  (t) => [
+    /** One account per provider subject: two staff cannot share a Google identity. */
+    uniqueIndex('user_identity_provider_subject_idx').on(t.provider, t.subject),
+    /** And one identity per provider per account, so a link is unambiguous both ways. */
+    uniqueIndex('user_identity_user_provider_idx').on(t.userId, t.provider),
   ],
 );

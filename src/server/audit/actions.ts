@@ -65,6 +65,14 @@ export const AUDIT_ACTIONS = [
   'prescription.create',
   'prescription.cancel',
 
+  /* Billing. PHI: an invoice ties a person to services on a date. */
+  'invoice.read',
+  'invoice.search',
+  'invoice.create',
+  'invoice.issue',
+  'invoice.void',
+  'payment.record',
+
   /* Administration. */
   'staff.read',
   'staff.create',
@@ -139,6 +147,12 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'triage.read',
   'triage.search',
   'triage.close',
+  'invoice.read',
+  'invoice.search',
+  'invoice.create',
+  'invoice.issue',
+  'invoice.void',
+  'payment.record',
 ]);
 
 /**
@@ -160,4 +174,6 @@ export const COLLECTION_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'prescription.search',
   /* The triage queue spans every patient who has described a symptom. */
   'triage.search',
+  /* The billing worklist spans every patient with an outstanding invoice. */
+  'invoice.search',
 ]);

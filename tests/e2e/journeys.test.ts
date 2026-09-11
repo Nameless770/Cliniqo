@@ -258,3 +258,73 @@ describe('a patient using the portal', () => {
     }
   });
 });
+
+/* ----------------------------------------------------------------- google sso */
+
+describe('Google sign-in', () => {
+  /*
+   * The e2e server IS configured with credentials that are never used, so the refusals
+   * below are reached by the real checks rather than by the feature being switched off.
+   * No request in this suite ever leaves for Google: every assertion lands before the
+   * token exchange.
+   */
+  it('offers the button when configured, as a POST form', async () => {
+    const page = await visitor().get('/login');
+
+    expect(text(page.html)).toMatch(/sign in with google/i);
+    /* A link would be followed by any prefetch. The form must POST. */
+    expect(page.html).toMatch(/action="\/auth\/google\/start"[^>]*method="POST"/i);
+    expect(text(page.html)).toMatch(/never creates one/i);
+  });
+
+  it('starts the flow only on POST, and sends a correct authorization request', async () => {
+    const session = visitor();
+    const page = await session.get('/login');
+    const response = await session.submit(page, '/auth/google/start');
+
+    const target = response.trail[response.trail.length - 1] ?? '';
+    const url = new URL(target);
+    expect(url.origin).toBe('https://accounts.google.com');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('state')).toBeTruthy();
+    expect(url.searchParams.get('nonce')).toBeTruthy();
+    expect(url.searchParams.get('scope')).toBe('openid email profile');
+
+    /* And the handshake cookie came back httpOnly — it holds the PKCE verifier. */
+    const handshake = session.rawSetCookies.find((c) => c.includes('cliniqo_oauth='));
+    expect(handshake).toBeTruthy();
+    expect(handshake!.toLowerCase()).toContain('httponly');
+  });
+
+  it('refuses the callback without a valid handshake', async () => {
+    /*
+     * The CSRF check, exercised against the real route. Arriving with a fabricated code
+     * and state and no handshake cookie is exactly what an attacker who has stolen an
+     * authorization code can do, and it must end at the sign-in page with no session.
+     */
+    const session = visitor();
+    const response = await session.head(
+      '/auth/google/callback?code=forged&state=forged',
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(300);
+    expect(response.status).toBeLessThan(400);
+    expect(response.headers.get('location') ?? '').toContain('/login');
+
+    // And crucially, nothing that looks like a session was handed out.
+    const handed = session.rawSetCookies.filter((c) => c.includes('cliniqo_session='));
+    expect(handed.every((c) => /cliniqo_session=;|cliniqo_session=""/.test(c))).toBe(true);
+
+    const still = await session.get('/dashboard');
+    expect(still.url).toContain('/login');
+  });
+
+  it('does not start a flow on GET', async () => {
+    /*
+     * A GET would be triggerable by any <img> or prefetch on any page the user visits.
+     * The start route is POST-only, so a stray navigation cannot begin authentication.
+     */
+    const response = await visitor().head('/auth/google/start');
+    expect([404, 405]).toContain(response.status);
+  });
+});

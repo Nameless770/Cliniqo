@@ -68,6 +68,17 @@ export async function startApp(): Promise<RunningApp> {
     ...process.env,
     APP_ENV: 'test',
     NEXT_DIST_DIR: DIST_DIR,
+    /*
+     * Google sign-in is CONFIGURED for the journeys, with credentials that are never
+     * used. Leaving it unset made the callback journey pass for the wrong reason: the
+     * route returns early when the feature is off, so a forged state redirected to
+     * /login without the CSRF check ever running. Configuring it means the handshake
+     * check is the thing actually under test. No request ever reaches Google — every
+     * assertion is on a refusal that happens before the token exchange.
+     */
+    APP_URL: baseUrl,
+    GOOGLE_CLIENT_ID: 'e2e-client-id.apps.googleusercontent.com',
+    GOOGLE_CLIENT_SECRET: 'e2e-client-secret-never-used',
     DATABASE_URL: withDatabase(required('DATABASE_URL'), TEST_DB),
     DATABASE_MIGRATION_URL: withDatabase(required('DATABASE_MIGRATION_URL'), TEST_DB),
     /* The journeys assert on triage behaviour, and they must assert on the engine that

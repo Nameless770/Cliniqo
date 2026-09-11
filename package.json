@@ -31,7 +31,8 @@
     "db:test-setup": "node --env-file-if-exists=.env ./scripts/test-db.js",
     "db:reset": "docker compose down -v && docker compose up -d && node ./scripts/wait-for-db.js && npm run db:setup",
     "verify": "npm run typecheck && npm run lint && npm run check:security && npm run check:deps && npm run db:check",
-    "maintenance": "node --env-file-if-exists=.env ./scripts/maintenance.js"
+    "maintenance": "node --env-file-if-exists=.env ./scripts/maintenance.js",
+    "db:seed-bulk": "node --env-file-if-exists=.env ./scripts/seed-bulk.js"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

@@ -127,6 +127,20 @@
       "when": 1789109249181,
       "tag": "0017_solid_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789114089839,
+      "tag": "0018_fast_lady_deathstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789116647010,
+      "tag": "0019_careless_drax",
+      "breakpoints": true
     }
   ]
 }

@@ -44,6 +44,10 @@ export type AuditEntityType =
   | 'break_glass_grant'
   | 'triage_conversation'
   | 'triage_message'
+  | 'invoice'
+  | 'invoice_line'
+  | 'payment'
+  | 'user_identity'
   | 'audit_event';
 
 export type AuditInput = {

@@ -44,6 +44,13 @@ export const clinic = pgTable('clinic', {
 
   /** Prefix and counter for issuing medical record numbers. */
   mrnPrefix: text('mrn_prefix').notNull().default('MRN'),
+
+  /**
+   * ISO 4217, for billing. Stored per clinic rather than assumed, for the same reason as
+   * the timezone above: the currency is a property of the practice, not of the server.
+   * Copied onto each invoice at creation so changing it never re-denominates history.
+   */
+  currency: text('currency').notNull().default('USD'),
   mrnSequence: integer('mrn_sequence').notNull().default(1),
 
   ...timestamps(),

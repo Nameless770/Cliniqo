@@ -56,6 +56,20 @@ export const PERMISSIONS = [
   'prescription.create',
   'prescription.cancel',
 
+  /* Billing.
+   *
+   * Held by admin and receptionist, and NOT by doctor — that is the shipping matrix, and
+   * it is a clinical judgement rather than an administrative one. A clinician does not
+   * need to know what a patient owes in order to treat them, and knowing it is the kind
+   * of thing that quietly shapes care.
+   *
+   * `billing.void` is separate from `billing.update` because voiding an issued invoice is
+   * a financial correction to a document already sent, not an edit. Admin only. */
+  'billing.read',
+  'billing.create',
+  'billing.void',
+  'payment.record',
+
   /* Administration. */
   'staff.read',
   'staff.create',
@@ -98,6 +112,9 @@ export const ROLE_PERMISSIONS: Record<RoleCode, readonly Permission[]> = {
     'appointment.cancel',
     'appointment.checkin',
     'appointment.status',
+    'billing.read',
+    'billing.create',
+    'payment.record',
   ],
 
   doctor: [
@@ -137,6 +154,12 @@ export const ROLE_PERMISSIONS: Record<RoleCode, readonly Permission[]> = {
     'note.read',
     // Read only. Prescribing is a licensed act; an administrator is not a clinician.
     'prescription.read',
+    'billing.read',
+    'billing.create',
+    // Only the administrator may void: reversing a document already sent is the one
+    // billing act that should need a second kind of authority.
+    'billing.void',
+    'payment.record',
     'staff.read',
     'staff.create',
     'staff.update',

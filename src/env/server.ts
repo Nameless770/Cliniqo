@@ -131,6 +131,24 @@ const schema = z
      * the configuration this exists to keep away from real patients.
      */
     TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED: booleanish.default(false),
+
+    /* --- Google sign-in (staff only) -------------------------------------- */
+    /**
+     * Optional. Absent means the feature does not exist: no button, no routes that do
+     * anything, no redirect. Password sign-in is always available and is never replaced.
+     */
+    GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+    GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+
+    /**
+     * Restrict sign-in to one Google Workspace domain, e.g. "fernbrook.example".
+     *
+     * Strongly recommended and checked server-side against the `hd` claim. Without it any
+     * Google account may attempt to sign in — they will still be refused unless their
+     * verified address matches a staff account, but narrowing the front door first is
+     * cheaper than relying on that one check.
+     */
+    GOOGLE_ALLOWED_HD: z.string().min(1).optional(),
   })
   /* --- Configuration coherence, every environment -------------------------- */
   .superRefine((env, ctx) => {
@@ -139,6 +157,20 @@ const schema = z
         code: 'custom',
         path: ['OPENAI_API_KEY'],
         message: 'OPENAI_API_KEY is required when TRIAGE_ENGINE=openai.',
+      });
+    }
+
+/*
+     * Both halves or neither. A client id with no secret is a half-configured flow that
+     * renders a button and fails at the token exchange, which looks like an outage rather
+     * than a misconfiguration.
+     */
+    if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['GOOGLE_CLIENT_SECRET'],
+        message:
+          'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together, or both left unset.',
       });
     }
 
@@ -175,6 +207,19 @@ const schema = z
         code: 'custom',
         path: ['APP_URL'],
         message: 'APP_URL is required in production.',
+      });
+    }
+
+    /*
+     * The OAuth redirect URI is derived from APP_URL and must match what is registered
+     * with Google exactly. Deriving it from request headers instead is how a host-header
+     * injection turns into an authorization code delivered to somebody else's domain.
+     */
+    if (env.GOOGLE_CLIENT_ID && !env.APP_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_URL'],
+        message: 'APP_URL is required when Google sign-in is configured.',
       });
     }
 
