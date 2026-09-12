@@ -149,6 +149,30 @@ const schema = z
      * cheaper than relying on that one check.
      */
     GOOGLE_ALLOWED_HD: z.string().min(1).optional(),
+
+    /* --- Google sign-in for PATIENTS -------------------------------------- */
+    /**
+     * Whether patients may connect a Google account to their portal login.
+     *
+     * OFF BY DEFAULT, and a separate decision from staff sign-in rather than something
+     * that follows from having configured GOOGLE_CLIENT_ID. The asymmetry is the point:
+     *
+     *   A staff member signing in with Google tells Google that one of its users
+     *   authenticated to an application. They are an employee. Nothing about that is
+     *   health information about anybody.
+     *
+     *   A PATIENT signing in the same way tells Google that a specific identified person
+     *   holds an account at a specific medical practice - which is to say, that they
+     *   receive care there. That is health information about that person, disclosed to a
+     *   company that signs no Business Associate Agreement for consumer sign-in.
+     *
+     * It is lawful because the INDIVIDUAL may authorize disclosures about themselves
+     * (§164.508), so the flow is opt-in per patient, records the authorization, and can
+     * be withdrawn. This flag is the layer above that: the clinic deciding to offer the
+     * choice at all. A deployment that leaves it false has no patient Google button, no
+     * portal OAuth routes that do anything, and nothing to withdraw.
+     */
+    PORTAL_GOOGLE_SIGN_IN: booleanish.default(false),
   })
   /* --- Configuration coherence, every environment -------------------------- */
   .superRefine((env, ctx) => {
@@ -160,11 +184,39 @@ const schema = z
       });
     }
 
-/*
+    /*
      * Both halves or neither. A client id with no secret is a half-configured flow that
      * renders a button and fails at the token exchange, which looks like an outage rather
      * than a misconfiguration.
      */
+    /*
+     * Offering patients a button that cannot work is worse than not offering it: the
+     * patient has already decided to accept the disclosure by the time it fails.
+     */
+    if (env.PORTAL_GOOGLE_SIGN_IN && !env.GOOGLE_CLIENT_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PORTAL_GOOGLE_SIGN_IN'],
+        message:
+          'PORTAL_GOOGLE_SIGN_IN=true requires GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.',
+      });
+    }
+
+    /*
+     * GOOGLE_ALLOWED_HD restricts sign-in to one Workspace domain. That is right for
+     * staff and incoherent for patients, who use personal addresses - so a deployment
+     * asking for both is asking for a patient button that refuses every patient.
+     */
+    if (env.PORTAL_GOOGLE_SIGN_IN && env.GOOGLE_ALLOWED_HD) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PORTAL_GOOGLE_SIGN_IN'],
+        message:
+          'PORTAL_GOOGLE_SIGN_IN cannot be combined with GOOGLE_ALLOWED_HD: patients sign ' +
+          'in with personal Google accounts, which by definition have no hosted domain.',
+      });
+    }
+
     if (Boolean(env.GOOGLE_CLIENT_ID) !== Boolean(env.GOOGLE_CLIENT_SECRET)) {
       ctx.addIssue({
         code: 'custom',

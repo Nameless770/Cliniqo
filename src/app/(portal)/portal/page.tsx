@@ -13,16 +13,26 @@ import { BookForm } from './BookForm';
 export const metadata = { title: 'Your appointments · Cliniqo' };
 export const dynamic = 'force-dynamic';
 
-function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
+function statusTone(
+  status: string,
+): 'success' | 'warning' | 'danger' | 'neutral' | 'info' {
   if (status === 'cancelled' || status === 'no_show') return 'neutral';
   if (status === 'completed') return 'success';
   if (status === 'checked_in' || status === 'in_progress') return 'info';
   return 'warning';
 }
 
-export default async function PortalHomePage() {
+export default async function PortalHomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ linked?: string }>;
+}) {
   const session = await getPatientSession();
   if (!session) redirect('/portal/login');
+
+  /* Set once, by the Google callback, on the sign-in that created the link. A
+     boolean about the sign-in method - no PHI, and nothing a referrer could leak. */
+  const { linked } = await searchParams;
 
   const [{ upcoming, past }, options] = await Promise.all([
     listMyAppointments(),
@@ -43,28 +53,63 @@ export default async function PortalHomePage() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: 'var(--text-xl)', margin: 0 }}>Hello, {session.fullName}</h1>
-          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+          <h1 style={{ fontSize: 'var(--text-xl)', margin: 0 }}>
+            Hello, {session.fullName}
+          </h1>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-secondary)',
+            }}
+          >
             {session.clinicName}
           </p>
         </div>
-        <form action={portalLogoutAction}>
-          <button
-            type="submit"
-            style={{
-              padding: 'var(--space-1) var(--space-3)',
-              border: '1px solid var(--border-default)',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--bg-surface)',
-              color: 'var(--text-secondary)',
-              fontSize: 'var(--text-sm)',
-              cursor: 'pointer',
-            }}
-          >
-            Sign out
-          </button>
-        </form>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+          <Link href="/portal/account" style={{ fontSize: 'var(--text-sm)' }}>
+            Your account
+          </Link>
+          <form action={portalLogoutAction}>
+            <button
+              type="submit"
+              style={{
+                padding: 'var(--space-1) var(--space-3)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--text-sm)',
+                cursor: 'pointer',
+              }}
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </header>
+
+      {/*
+        Shown once, after the sign-in that created the link. It confirms what just
+        happened and points at where to undo it - a connection made silently, with no
+        way back visible, is not something a patient has agreed to in any real sense.
+      */}
+      {linked === '1' ? (
+        <p
+          role="status"
+          style={{
+            margin: 0,
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          Your Google account is now connected to this portal. You can{' '}
+          <Link href="/portal/account">disconnect it at any time</Link>.
+        </p>
+      ) : null}
 
       {/*
         The way in to triage. Placed above booking on purpose: a patient who does not know
@@ -99,43 +144,55 @@ export default async function PortalHomePage() {
       <section style={{ display: 'grid', gap: 'var(--space-3)' }}>
         <h2 style={{ fontSize: 'var(--text-md)', margin: 0 }}>Upcoming</h2>
         {upcoming.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-secondary)',
+            }}
+          >
             You have no upcoming appointments.
           </p>
         ) : (
           upcoming.map((a) => (
-              <article
-                key={a.id}
-                style={{
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--bg-surface)',
-                  padding: 'var(--space-3) var(--space-4)',
-                  display: 'flex',
-                  gap: 'var(--space-3)',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span style={{ fontWeight: 'var(--weight-semibold)', minWidth: '11rem' }}>
-                  {formatDateInZone(a.startsAt, tz)} · {formatTimeInZone(a.startsAt, tz)}
-                </span>
-                <span style={{ flex: '1 1 10rem' }}>
-                  {a.typeName} · {a.providerName}
-                </span>
-                <Badge tone={statusTone(a.status)}>{a.status.replace(/_/g, ' ')}</Badge>
-                {a.status === 'scheduled' ? (
-                  <AppointmentActions appointmentId={a.id} timeZone={tz} />
-                ) : null}
-              </article>
-            ))
+            <article
+              key={a.id}
+              style={{
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-surface)',
+                padding: 'var(--space-3) var(--space-4)',
+                display: 'flex',
+                gap: 'var(--space-3)',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span style={{ fontWeight: 'var(--weight-semibold)', minWidth: '11rem' }}>
+                {formatDateInZone(a.startsAt, tz)} · {formatTimeInZone(a.startsAt, tz)}
+              </span>
+              <span style={{ flex: '1 1 10rem' }}>
+                {a.typeName} · {a.providerName}
+              </span>
+              <Badge tone={statusTone(a.status)}>{a.status.replace(/_/g, ' ')}</Badge>
+              {a.status === 'scheduled' ? (
+                <AppointmentActions appointmentId={a.id} timeZone={tz} />
+              ) : null}
+            </article>
+          ))
         )}
       </section>
 
       {/* ------------------------------------------------------ past */}
       {past.length > 0 ? (
         <section style={{ display: 'grid', gap: 'var(--space-3)' }}>
-          <h2 style={{ fontSize: 'var(--text-md)', margin: 0, color: 'var(--text-secondary)' }}>
+          <h2
+            style={{
+              fontSize: 'var(--text-md)',
+              margin: 0,
+              color: 'var(--text-secondary)',
+            }}
+          >
             Past &amp; cancelled
           </h2>
           {past.map((a) => (

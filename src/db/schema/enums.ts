@@ -187,6 +187,7 @@ export const auditEntityType = pgEnum('audit_entity_type', [
   'invoice_line',
   'payment',
   'user_identity',
+  'patient_identity',
   /* Reading the audit log is itself an audited event, and its object is the log. */
   'audit_event',
 ]);
@@ -234,7 +235,12 @@ export const triageMessageRole = pgEnum('triage_message_role', ['patient', 'assi
  */
 export const identityProvider = pgEnum('identity_provider', ['google']);
 
-export const invoiceStatus = pgEnum('invoice_status', ['draft', 'issued', 'paid', 'void']);
+export const invoiceStatus = pgEnum('invoice_status', [
+  'draft',
+  'issued',
+  'paid',
+  'void',
+]);
 
 export const paymentMethod = pgEnum('payment_method', [
   'cash',

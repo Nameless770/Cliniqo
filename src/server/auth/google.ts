@@ -8,20 +8,26 @@ import { getEnv } from '@/env/server';
  * Google sign-in for STAFF, as an OAuth 2.0 authorization-code flow with PKCE.
  *
  * ==========================================================================
- * WHY STAFF ONLY, AND NOT PATIENTS
+ * THE STAFF HALF. PATIENTS ARE `@/server/portal/google`
  * ==========================================================================
  *
- * When a staff member signs in with Google, Google learns that one of its users
- * authenticated to an application. They are an employee; that is not protected health
- * information about anybody.
+ * The two audiences share everything in this file — PKCE, state, nonce, the token
+ * exchange — and share nothing else: different redirect URI, different handshake cookie,
+ * different callback route, different resolver, different session table. So a handshake
+ * begun on the portal cannot be completed here, and a patient's sign-in cannot resolve to
+ * a staff session even when the same human holds both.
  *
- * If a PATIENT signed in the same way, Google would learn that a specific identified
- * person holds an account at a specific medical practice — which is to say, that they
- * receive care there. That is health information about that person, and disclosing it to a
- * third party needs a Business Associate Agreement and, realistically, the patient's own
- * decision rather than the clinic's. The patient portal therefore keeps its own password
- * sign-in and this flow is not offered there. That asymmetry is the whole reason this file
- * says "staff" in every other sentence.
+ * They are also not the same decision, and the asymmetry is worth stating where somebody
+ * will read it. A staff member signing in with Google tells Google that one of its users
+ * authenticated to an application; they are an employee, and that is not health
+ * information about anybody. A PATIENT signing in the same way tells Google that a
+ * specific identified person holds an account at a specific medical practice — which is
+ * to say, that they receive care there. That is health information about that person.
+ *
+ * So the patient flow is off by default, is opt-in per patient with the disclosure stated
+ * before the click, records the authorization, and can be withdrawn. None of which
+ * applies here. Configuring this file's credentials does not switch that on; only
+ * PORTAL_GOOGLE_SIGN_IN does.
  *
  * ==========================================================================
  * NO SDK, AND NO GOOGLE JAVASCRIPT

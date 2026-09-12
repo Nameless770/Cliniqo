@@ -22,7 +22,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { clinic } from './clinic';
-import { userStatus } from './enums';
+import { identityProvider, userStatus } from './enums';
 import { userAccount } from './identity';
 import { patient } from './patient';
 import { citext, primaryId, softDelete, timestamps } from './shared';
@@ -137,5 +137,76 @@ export const patientSetupToken = pgTable(
     uniqueIndex('patient_setup_token_live_idx')
       .on(t.patientId)
       .where(sql`${t.usedAt} is null and ${t.revokedAt} is null`),
+  ],
+);
+
+/**
+ * A patient's link to an external identity provider — today, Google.
+ *
+ * ==========================================================================
+ * WHY THIS IS A SEPARATE TABLE FROM `user_identity`
+ * ==========================================================================
+ *
+ * Same reasoning as `patient_account` versus `user_account`, and it is the load-bearing
+ * control for this feature. The staff resolver reads `user_identity` and only ever joins
+ * to `user_account`; this one reads `patient_identity` and only ever joins to
+ * `patient_account`. Neither query can reach the other's rows, so a Google subject linked
+ * to a patient cannot resolve to a staff session even if the same human holds both — and
+ * the two flows carry different cookies so a handshake cannot be replayed across them.
+ *
+ * ==========================================================================
+ * THIS ROW IS A CONSENT RECORD, NOT JUST A FOREIGN KEY
+ * ==========================================================================
+ *
+ * Signing in to a medical practice with Google tells Google that this identified person
+ * has an account at this practice — which is to say, that they receive care there. That
+ * is health information about them, disclosed to a company that does not sign a Business
+ * Associate Agreement for consumer sign-in. It is permissible because the INDIVIDUAL
+ * chooses it for themselves (§164.508), and the columns below are what makes that choice
+ * evidentiary rather than assumed: when they authorized it, and from where.
+ *
+ * Which is also why `revoked_at` exists instead of a DELETE. A patient may withdraw the
+ * authorization, and the record that it was given and then withdrawn is the part worth
+ * keeping — an authorization you cannot prove, or cannot prove was withdrawn, is not much
+ * of an authorization.
+ */
+export const patientIdentity = pgTable(
+  'patient_identity',
+  {
+    id: primaryId(),
+    patientAccountId: uuid('patient_account_id')
+      .notNull()
+      .references(() => patientAccount.id),
+
+    provider: identityProvider('provider').notNull(),
+    /** The provider's immutable subject identifier. Never the email — emails get reused. */
+    subject: text('subject').notNull(),
+
+    /** What the provider asserted at link time. For display and support, not for lookup. */
+    emailAtLink: citext('email_at_link').notNull(),
+
+    /** The moment the patient authorized the disclosure, and where from. */
+    linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+    linkedIp: inet('linked_ip'),
+
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+
+    /** Set when the patient withdraws the authorization. The row stays. */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+
+    ...timestamps(),
+  },
+  (t) => [
+    /*
+     * One live link per provider subject, and one per account. Both partial on
+     * `revoked_at is null` so that withdrawing an authorization and later granting it
+     * again works, rather than colliding with the tombstone of the first.
+     */
+    uniqueIndex('patient_identity_provider_subject_live_idx')
+      .on(t.provider, t.subject)
+      .where(sql`${t.revokedAt} is null`),
+    uniqueIndex('patient_identity_account_provider_live_idx')
+      .on(t.patientAccountId, t.provider)
+      .where(sql`${t.revokedAt} is null`),
   ],
 );

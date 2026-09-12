@@ -82,7 +82,24 @@ export function middleware(request: NextRequest) {
      */
     "connect-src 'self'",
     "frame-ancestors 'none'",
-    "form-action 'self'",
+    /*
+     * `accounts.google.com` is here because of how Chromium enforces this directive.
+     *
+     * Google sign-in starts as a same-origin form POST to /auth/google/start, which
+     * answers 303 to accounts.google.com. Chromium re-checks `form-action` against the
+     * REDIRECT TARGET, so `'self'` alone blocks the navigation — and reports the
+     * violation against the original same-origin URL (the spec hides redirect targets to
+     * avoid leaking them), which is why the console error reads as though a same-origin
+     * POST were being refused. Firefox does not re-check, so the flow appears to work
+     * there; that difference is what makes this worth a comment rather than a fix.
+     *
+     * Narrow on purpose: one origin, one directive. `form-action` governs where a form
+     * may NAVIGATE, not what may be read back — a script that abused this could push
+     * data into Google's sign-in endpoint but could not retrieve it. The directive that
+     * actually bounds exfiltration, `connect-src 'self'`, is untouched, and no
+     * `script-src` entry is added because this flow loads no Google JavaScript.
+     */
+    "form-action 'self' https://accounts.google.com",
     "base-uri 'self'",
     "object-src 'none'",
     // Blocks <base>-style downgrade tricks and mixed content in one line.

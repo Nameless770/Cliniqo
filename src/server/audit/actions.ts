@@ -20,6 +20,12 @@ export const AUDIT_ACTIONS = [
   'auth.logout',
   'auth.password_change',
   'session.revoke',
+  /* Connecting or disconnecting an external identity provider. Its own actions
+     rather than metadata on `auth.login`, because for a PATIENT this is a recorded
+     authorization to disclose their relationship with the clinic to a third party
+     (§164.508) and has to be answerable by query, not by reading JSON. */
+  'identity.link',
+  'identity.unlink',
 
   /* Authorization refusals. The first visible sign of a compromised account. */
   'authz.denied',

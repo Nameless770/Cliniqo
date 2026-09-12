@@ -97,6 +97,31 @@ export default async function LoginPage({
         </p>
       ) : null}
 
+      {/*
+        A DIFFERENT message, on purpose, and the only refusal that is allowed to be
+        distinguishable. Every other outcome collapses into one message so this page
+        cannot be asked which addresses hold staff accounts — but an outage answers
+        identically for every address, so it reveals nothing about any of them, and
+        showing the same "ask an administrator" text would send somebody hunting for a
+        mistake they did not make.
+      */}
+      {error === 'unavailable' ? (
+        <p
+          role="alert"
+          style={{
+            margin: '0 0 var(--space-4)',
+            padding: 'var(--space-2) var(--space-3)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--status-warn-bg)',
+            color: 'var(--status-warn-text)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          Sign-in is temporarily unavailable. Nothing is wrong with your account — please
+          try again shortly.
+        </p>
+      ) : null}
+
       <LoginForm />
 
       {google ? (

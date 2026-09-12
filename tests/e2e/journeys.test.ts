@@ -303,9 +303,7 @@ describe('Google sign-in', () => {
      * authorization code can do, and it must end at the sign-in page with no session.
      */
     const session = visitor();
-    const response = await session.head(
-      '/auth/google/callback?code=forged&state=forged',
-    );
+    const response = await session.head('/auth/google/callback?code=forged&state=forged');
 
     expect(response.status).toBeGreaterThanOrEqual(300);
     expect(response.status).toBeLessThan(400);
@@ -313,7 +311,9 @@ describe('Google sign-in', () => {
 
     // And crucially, nothing that looks like a session was handed out.
     const handed = session.rawSetCookies.filter((c) => c.includes('cliniqo_session='));
-    expect(handed.every((c) => /cliniqo_session=;|cliniqo_session=""/.test(c))).toBe(true);
+    expect(handed.every((c) => /cliniqo_session=;|cliniqo_session=""/.test(c))).toBe(
+      true,
+    );
 
     const still = await session.get('/dashboard');
     expect(still.url).toContain('/login');
@@ -325,6 +325,138 @@ describe('Google sign-in', () => {
      * The start route is POST-only, so a stray navigation cannot begin authentication.
      */
     const response = await visitor().head('/auth/google/start');
+    expect([404, 405]).toContain(response.status);
+  });
+});
+
+/* ---------------------------------------------------------- portal google sso */
+
+describe('Patient Google sign-in', () => {
+  /*
+   * Configured with credentials that are never used, same as the staff suite. Nothing
+   * here leaves for Google: every assertion lands before the token exchange.
+   */
+  it('states what Google learns before offering the button', async () => {
+    const page = await visitor().get('/portal/login');
+    const body = text(page.html);
+
+    expect(body).toMatch(/continue with google/i);
+
+    /*
+     * The notice is the control, not decoration. Pressing this button IS the disclosure
+     * — the redirect tells Google that this person is signing in to a medical practice —
+     * so the patient can only be the one choosing it if they were told first. A layout
+     * change that moved the button above the notice, or dropped it, would leave a flow
+     * that discloses something a patient never agreed to.
+     */
+    const notice = body.search(/tells Google that you have an account with this clinic/i);
+    const button = body.search(/continue with google/i);
+    expect(notice).toBeGreaterThan(-1);
+    expect(notice).toBeLessThan(button);
+
+    // And that the alternative shares nothing, so the choice is a real one.
+    expect(body).toMatch(/password sign-in above shares nothing/i);
+    expect(body).toMatch(/never creates one/i);
+
+    /* A link would be followed by any prefetch. The form must POST. */
+    expect(page.html).toMatch(
+      /action="\/portal\/auth\/google\/start"[^>]*method="POST"/i,
+    );
+  });
+
+  it('starts the flow at the portal redirect URI, under its own cookie', async () => {
+    const session = visitor();
+    const page = await session.get('/portal/login');
+    const response = await session.submit(page, '/portal/auth/google/start');
+
+    const url = new URL(response.trail[response.trail.length - 1] ?? '');
+    expect(url.origin).toBe('https://accounts.google.com');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('scope')).toBe('openid email profile');
+
+    /* The PORTAL callback, not the staff one. Sharing a redirect URI would put both
+       audiences behind one door. */
+    expect(url.searchParams.get('redirect_uri')).toMatch(
+      /\/portal\/auth\/google\/callback$/,
+    );
+
+    /*
+     * Patients sign in with personal Google accounts, which carry no `hd` claim. A
+     * hosted-domain hint here would ask Google to refuse every one of them.
+     */
+    expect(url.searchParams.has('hd')).toBe(false);
+
+    const handshake = session.rawSetCookies.find((c) =>
+      c.includes('cliniqo_portal_oauth='),
+    );
+    expect(handshake).toBeTruthy();
+    expect(handshake!.toLowerCase()).toContain('httponly');
+
+    // And emphatically NOT the staff handshake cookie.
+    expect(session.rawSetCookies.some((c) => c.startsWith('cliniqo_oauth='))).toBe(false);
+  });
+
+  it('refuses the portal callback without a valid handshake', async () => {
+    const session = visitor();
+    const response = await session.head(
+      '/portal/auth/google/callback?code=forged&state=forged',
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(300);
+    expect(response.status).toBeLessThan(400);
+    expect(response.headers.get('location') ?? '').toContain('/portal/login');
+
+    const handed = session.rawSetCookies.filter((c) => c.includes('cliniqo_portal='));
+    expect(handed.every((c) => /cliniqo_portal=;|cliniqo_portal=""/.test(c))).toBe(true);
+
+    const still = await session.get('/portal');
+    expect(still.url).toContain('/portal/login');
+  });
+
+  it('cannot complete a portal handshake at the staff door, or the reverse', async () => {
+    /*
+     * ==================================================================
+     * THE CROSS-DOOR TEST
+     * ==================================================================
+     *
+     * The interesting attack on a two-audience SSO: begin a flow on the portal, then
+     * finish it at the staff callback and see whether the patient's verified address also
+     * matches a staff account. If it did, a patient's consent to sign in to their own
+     * portal would have minted a staff session over the whole clinic's records.
+     *
+     * What forecloses it is that each callback reads only its own handshake cookie. So a
+     * browser holding a live PORTAL handshake, arriving at the STAFF callback with the
+     * matching state, must be refused — the staff door cannot see that handshake at all.
+     */
+    const session = visitor();
+    const page = await session.get('/portal/login');
+    const started = await session.submit(page, '/portal/auth/google/start');
+
+    const state = new URL(started.trail[started.trail.length - 1] ?? '').searchParams.get(
+      'state',
+    );
+    expect(state).toBeTruthy();
+
+    // The real state from a real, live portal handshake — carried to the wrong door.
+    const crossed = await session.head(
+      `/auth/google/callback?code=whatever&state=${encodeURIComponent(state!)}`,
+    );
+    expect(crossed.headers.get('location') ?? '').toContain('/login?error=sso');
+
+    const staffSession = session.rawSetCookies.filter((c) =>
+      c.includes('cliniqo_session='),
+    );
+    expect(
+      staffSession.every((c) => /cliniqo_session=;|cliniqo_session=""/.test(c)),
+    ).toBe(true);
+
+    // And the dashboard is still shut.
+    const dash = await session.get('/dashboard');
+    expect(dash.url).toContain('/login');
+  });
+
+  it('does not start a portal flow on GET', async () => {
+    const response = await visitor().head('/portal/auth/google/start');
     expect([404, 405]).toContain(response.status);
   });
 });

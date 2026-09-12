@@ -25,7 +25,7 @@ import { hashToken } from '@/server/auth/session';
  * server-side lookup rather than a hope that a JWT expires.
  */
 
-function portalCookieName(): string {
+export function portalCookieName(): string {
   const env = getEnv().APP_ENV;
   return env === 'development' || env === 'test'
     ? 'cliniqo_portal'

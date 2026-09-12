@@ -633,7 +633,7 @@ void randomUUID;
   check(
     'Password change',
     'the change page itself is exempt (no redirect loop)',
-    layoutCode.includes("pathname !== PASSWORD_CHANGE_PATH"),
+    layoutCode.includes('pathname !== PASSWORD_CHANGE_PATH'),
   );
   check(
     'Password change',
@@ -716,7 +716,8 @@ void randomUUID;
   check(
     'Form input',
     'no server-timezone parse of a submitted appointment time',
-    !apptDa.includes('new Date(input.startsAt)') && !apptDa.includes('new Date(startsAt)'),
+    !apptDa.includes('new Date(input.startsAt)') &&
+      !apptDa.includes('new Date(startsAt)'),
   );
 }
 
@@ -863,7 +864,6 @@ void randomUUID;
   );
 }
 
-
 /* ------------------------------------------------- Transaction concurrency */
 
 /*
@@ -980,7 +980,10 @@ void randomUUID;
       for (const entry of readdirSync(d, { withFileTypes: true })) {
         const p = `${d}/${entry.name}`;
         if (entry.isDirectory()) walk(p);
-        else if (/\.tsx?$/.test(entry.name) && read(p).includes('new OpenAiTriageEngine(')) {
+        else if (
+          /\.tsx?$/.test(entry.name) &&
+          read(p).includes('new OpenAiTriageEngine(')
+        ) {
           constructors.push(p);
         }
       }
@@ -1028,7 +1031,9 @@ void randomUUID;
   const jobs = read('src/server/maintenance/jobs.ts');
   const runner = read('src/server/maintenance/run.ts');
 
-  const exported = [...jobs.matchAll(/export const (\w+): MaintenanceJob/g)].map((m) => m[1]);
+  const exported = [...jobs.matchAll(/export const (\w+): MaintenanceJob/g)].map(
+    (m) => m[1],
+  );
   const registryStart = jobs.indexOf('MAINTENANCE_JOBS: readonly MaintenanceJob[] = [');
   const registry = jobs.slice(registryStart, jobs.indexOf('];', registryStart));
 
@@ -1067,7 +1072,8 @@ void randomUUID;
   check(
     'Scheduled maintenance',
     'a failed job is recorded rather than only thrown',
-    runner.includes("outcome = 'failed'") && runner.includes('INSERT INTO maintenance_run'),
+    runner.includes("outcome = 'failed'") &&
+      runner.includes('INSERT INTO maintenance_run'),
   );
 
   check(
@@ -1076,6 +1082,196 @@ void randomUUID;
     /REVOKE\s+UPDATE,\s*DELETE,\s*TRUNCATE\s+ON\s+"maintenance_run"\s+FROM\s+cliniqo_app/i.test(
       read('drizzle/0017_solid_quicksilver.sql'),
     ),
+  );
+}
+
+/* ----------------------------------------------------------- Google sign-in */
+
+/*
+ * Two flows, two doors, and one CSP directive that silently breaks both.
+ */
+{
+  const mw = read('src/middleware.ts');
+  const staffStart = read('src/app/auth/google/start/route.ts');
+  const staffCallback = read('src/app/auth/google/callback/route.ts');
+  const portalStart = read('src/app/(portal)/portal/auth/google/start/route.ts');
+  const portalCallback = read('src/app/(portal)/portal/auth/google/callback/route.ts');
+  const staffModule = read('src/server/auth/google.ts');
+  const portalModule = read('src/server/portal/google.ts');
+  const envFile = read('src/env/server.ts');
+  const portalLogin = read('src/app/(portal)/portal/login/page.tsx');
+
+  /*
+   * Read from the RAW source, anchored on the double quotes of the directive string.
+   *
+   * Not `stripComments`: its `//` line-comment rule also eats the `//` in
+   * `https://accounts.google.com`, which silently truncates every directive it is asked
+   * about — the comments above these directives quote `form-action` in backticks and
+   * `'self'` in single quotes, so anchoring on `"` is what actually disambiguates them.
+   */
+  const directive = (name) => new RegExp(`"${name} ([^"]+)"`).exec(mw)?.[1] ?? '';
+  const formAction = directive('form-action');
+
+  /*
+   * The bug this group was written for.
+   *
+   * Sign-in starts as a same-origin form POST that answers 303 to accounts.google.com,
+   * and Chromium re-checks `form-action` against the REDIRECT TARGET — so `'self'` alone
+   * blocks the navigation and reports the violation against the original same-origin URL.
+   * Firefox does not re-check, so the flow looks fine there. Nothing fails at build,
+   * lint or test time; the button simply does nothing in Chrome.
+   */
+  check(
+    'Google sign-in',
+    'the CSP permits the redirect to Google (Chromium re-checks form-action on redirect)',
+    formAction.includes("'self'") && formAction.includes('https://accounts.google.com'),
+  );
+
+  /*
+   * And ONLY there. `connect-src 'self'` is what bounds exfiltration on pages rendering
+   * PHI, and this flow is server-side redirects plus one server-to-server POST — it needs
+   * no Google origin in connect-src and no Google script at all. An entry in either is a
+   * PHI egress path that arrived as a sign-in convenience.
+   */
+  check(
+    'Google sign-in',
+    'no Google origin reaches connect-src or script-src',
+    !/google/i.test(directive('connect-src')) && !/google/i.test(directive('script-src')),
+  );
+
+  /*
+   * The separation that keeps a patient's Google sign-in out of the staff door.
+   *
+   * If the two flows shared a handshake cookie, a portal sign-in could be completed at
+   * the staff callback — which would then look up the patient's verified address in
+   * `user_account` and, for anyone who is both, mint a staff session from a patient's
+   * consent. Different cookie names are what make that unreachable rather than merely
+   * unintended.
+   */
+  const staffCookie = /OAUTH_COOKIE = '([^']+)'/.exec(staffModule)?.[1];
+  const portalCookie = /PORTAL_OAUTH_COOKIE = '([^']+)'/.exec(portalModule)?.[1];
+  check(
+    'Google sign-in',
+    'the staff and patient handshakes use different cookies',
+    Boolean(staffCookie) && Boolean(portalCookie) && staffCookie !== portalCookie,
+  );
+
+  /* Comments stripped: both files NAME the other table while explaining why they never
+     read it, and the prose must not be what satisfies the check. */
+  check(
+    'Google sign-in',
+    'neither callback can resolve the other audience',
+    !/user_?[Aa]ccount/.test(
+      stripComments(portalCallback) + stripComments(portalModule),
+    ) && !/patient_?[Aa]ccount/.test(stripComments(staffCallback)),
+  );
+
+  /*
+   * POST only, on both. A GET start route fires from any prefetch, link or <img> on any
+   * page — and on the portal the redirect ITSELF is the disclosure being consented to, so
+   * a drive-by GET would make the disclosure without anybody choosing it.
+   */
+  check(
+    'Google sign-in',
+    'both start routes are POST-only',
+    !/export\s+async\s+function\s+GET/.test(staffStart) &&
+      !/export\s+async\s+function\s+GET/.test(portalStart),
+  );
+
+  /*
+   * Off unless the clinic says otherwise. Staff sign-in tells Google that an employee
+   * authenticated somewhere; patient sign-in tells Google that an identified person
+   * receives care at a named practice. Inheriting the second from the first would make
+   * that disclosure a side effect of a configuration change.
+   */
+  check(
+    'Google sign-in',
+    'patient Google sign-in is off by default',
+    /PORTAL_GOOGLE_SIGN_IN: booleanish\.default\(false\)/.test(envFile),
+  );
+
+  check(
+    'Google sign-in',
+    'a hosted-domain restriction cannot be applied to patients',
+    /PORTAL_GOOGLE_SIGN_IN && env\.GOOGLE_ALLOWED_HD/.test(envFile) &&
+      /allowedHostedDomain: undefined/.test(portalModule),
+  );
+
+  /*
+   * Links, never creates — on both sides. A sign-in that could create its own account
+   * would let anyone with a Google address mint a login on a system holding patient
+   * records; on the portal it would also answer "is this person a patient here?" by
+   * succeeding for strangers.
+   */
+  check(
+    'Google sign-in',
+    'neither flow can create an account',
+    !/insert\(userAccount\)/.test(staffCallback) &&
+      !/insert\(patientAccount\)/.test(portalModule + portalCallback),
+  );
+
+  /*
+   * An unverified address is a claim in a profile, and on the portal it resolves straight
+   * to somebody's medical record.
+   */
+  check(
+    'Google sign-in',
+    'an unverified Google address is refused by both callbacks',
+    /emailVerified/.test(staffCallback) && /emailVerified/.test(portalCallback),
+  );
+
+  /*
+   * Withdrawing consent revokes the row; it never deletes it. The record that an
+   * authorization was given and later taken back is the evidentiary part — a link that
+   * vanishes leaves the clinic unable to show either.
+   */
+  check(
+    'Google sign-in',
+    'a withdrawn patient link is revoked, not deleted',
+    /revokedAt: new Date\(\)/.test(portalModule) &&
+      !/\.delete\(patientIdentity\)/.test(portalModule),
+  );
+
+  /*
+   * The notice has to come BEFORE the button, because pressing the button is itself the
+   * disclosure. Everything else in the feature — the recorded authorization, the audit
+   * row, the disconnect control — is downstream of the patient having been told first.
+   */
+  const noticeAt = portalLogin.indexOf('tells Google that');
+  const buttonAt = portalLogin.indexOf('Continue with Google');
+  check(
+    'Google sign-in',
+    'the portal states what Google learns before the button that tells it',
+    noticeAt !== -1 && buttonAt !== -1 && noticeAt < buttonAt,
+  );
+
+  /*
+   * A database outage must not leave the handshake behind.
+   *
+   * Both callbacks promise, in a comment on the helper that builds every response, that
+   * the handshake is single-use WHATEVER the outcome. A throw skips that helper, so an
+   * unreachable database left the cookie set and answered 500 -- observed, not theorised.
+   * The catch is what makes the comment true, and this is what keeps the catch there.
+   */
+  for (const [name, source] of [
+    ['staff', staffCallback],
+    ['portal', portalCallback],
+  ]) {
+    check(
+      'Google sign-in',
+      `a database failure in the ${name} callback still clears the handshake`,
+      /} catch \{\s*return response\(UNAVAILABLE\);/.test(stripComments(source)),
+    );
+  }
+
+  /*
+   * The portal SSO door reaches the same records as the password door, so it gets the
+   * same limiter. An SSO path that skips rate limiting is simply the cheaper way in.
+   */
+  check(
+    'Google sign-in',
+    'the portal callback is rate limited like the password login',
+    /checkIpRateLimit/.test(portalCallback) && /recordAttempt/.test(portalCallback),
   );
 }
 

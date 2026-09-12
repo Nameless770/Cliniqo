@@ -15,10 +15,8 @@ import {
 } from '@/lib/portal-schemas';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import { requestMeta, safeInet } from '@/server/auth/session';
-import {
-  redeemPatientSetupToken,
-  verifyPatientLogin,
-} from '@/server/portal/accounts';
+import { redeemPatientSetupToken, verifyPatientLogin } from '@/server/portal/accounts';
+import { unlinkGoogle } from '@/server/portal/google';
 import { sendTriageMessage } from '@/server/portal/triage';
 import {
   bookMyAppointment,
@@ -69,11 +67,18 @@ export async function portalLoginAction(
 
   const verdict = await checkIpRateLimit(ip);
   if (!verdict.allowed) {
-    return { message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.` };
+    return {
+      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
+    };
   }
 
   const { userAgent } = await requestMeta();
-  const result = await verifyPatientLogin(parsed.data.email, parsed.data.password, ip, userAgent);
+  const result = await verifyPatientLogin(
+    parsed.data.email,
+    parsed.data.password,
+    ip,
+    userAgent,
+  );
 
   // One message for wrong email and wrong password alike — never confirm an address exists.
   await recordAttempt({ email: parsed.data.email, ip, succeeded: result.ok });
@@ -106,10 +111,16 @@ export async function portalClaimAction(
 
   const verdict = await checkIpRateLimit(ip);
   if (!verdict.allowed) {
-    return { message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.` };
+    return {
+      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
+    };
   }
 
-  const result = await redeemPatientSetupToken(parsed.data.token, parsed.data.password, ip);
+  const result = await redeemPatientSetupToken(
+    parsed.data.token,
+    parsed.data.password,
+    ip,
+  );
   if (!result.ok) {
     return {
       message:
@@ -202,7 +213,6 @@ export async function portalScheduleAction(
   return openings;
 }
 
-
 /**
  * Symptom triage: the patient describes something, and gets one short answer back.
  *
@@ -258,13 +268,13 @@ const CHANGE_DENIALS: Record<string, string> = {
   not_found: 'That appointment is no longer available.',
   not_changeable:
     'That appointment can no longer be changed online. Please call the clinic.',
-  too_late:
-    'That appointment has already started or passed. Please call the clinic.',
+  too_late: 'That appointment has already started or passed. Please call the clinic.',
   invalid_time: 'That is not a valid date and time.',
   past: 'Choose a time in the future.',
   outside_hours: 'The clinic is not open then.',
   unavailable: 'That clinician is not available then. Please choose another time.',
-  unknown_provider: 'That clinician is no longer taking bookings. Please call the clinic.',
+  unknown_provider:
+    'That clinician is no longer taking bookings. Please call the clinic.',
   slot_taken: 'That slot was just taken. Please choose another time.',
 };
 
@@ -276,7 +286,8 @@ export async function portalCancelAction(
   if (!parsed.success) return { message: 'Bad request.' };
 
   const result = await cancelMyAppointment(parsed.data.appointmentId);
-  if (!result.ok) return { message: CHANGE_DENIALS[result.reason] ?? 'That did not work.' };
+  if (!result.ok)
+    return { message: CHANGE_DENIALS[result.reason] ?? 'That did not work.' };
 
   revalidatePath('/portal');
   return { ok: true, message: 'Appointment cancelled.' };
@@ -293,8 +304,37 @@ export async function portalRescheduleAction(
     parsed.data.appointmentId,
     parsed.data.startsAt,
   );
-  if (!result.ok) return { message: CHANGE_DENIALS[result.reason] ?? 'That did not work.' };
+  if (!result.ok)
+    return { message: CHANGE_DENIALS[result.reason] ?? 'That did not work.' };
 
   revalidatePath('/portal');
   return { ok: true, message: 'Appointment moved.' };
+}
+
+/**
+ * Disconnect the patient's Google account.
+ *
+ * The authorization check is the first thing in the body and is the whole of it: a portal
+ * session identifies exactly one `patientAccountId`, and that is the only account this can
+ * touch. Nothing is read from the form — there is no id to tamper with, because the action
+ * takes none.
+ *
+ * Revokes rather than deletes, and leaves the password login alone, so withdrawing consent
+ * can never lock a patient out of their own record. It cannot un-tell Google anything that
+ * has already been told; the page says so rather than implying a clean slate.
+ */
+export async function portalUnlinkGoogleAction(): Promise<void> {
+  const session = await getPatientSession();
+  if (!session) redirect('/portal/login');
+
+  const { ip: rawIp, userAgent } = await requestMeta();
+  await unlinkGoogle(
+    session.patientAccountId,
+    session.clinicId,
+    session.patientId,
+    safeInet(rawIp),
+    userAgent,
+  );
+
+  revalidatePath('/portal/account');
 }

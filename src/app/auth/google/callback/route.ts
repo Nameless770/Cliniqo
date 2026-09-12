@@ -46,6 +46,9 @@ import {
 export const dynamic = 'force-dynamic';
 
 const FAILURE = '/login?error=sso';
+/* An infrastructure failure, not a refusal. See the try/catch below for why the two
+   are allowed to be distinguishable when no other refusal is. */
+const UNAVAILABLE = '/login?error=unavailable';
 
 function parseHandshake(raw: string | undefined): OAuthHandshake | null {
   if (!raw) return null;
@@ -104,151 +107,185 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   /* The `hd` claim, checked server-side. The `hd` parameter on the way out is only a hint
      to Google's chooser and is not a control. */
-  if (config.allowedHostedDomain && identity.hostedDomain !== config.allowedHostedDomain) {
+  if (
+    config.allowedHostedDomain &&
+    identity.hostedDomain !== config.allowedHostedDomain
+  ) {
     return response(FAILURE);
   }
-
-  const db = getDb();
-  const { ip: rawIp, userAgent } = await requestMeta();
-  const ip = safeInet(rawIp);
 
   /*
-   * Resolve the account. An existing link wins over the email, because `sub` is stable and
-   * an email is not: if a departing employee's address is reassigned to their replacement,
-   * matching on email would hand over the old account.
+   * ==========================================================================
+   * EVERYTHING BELOW TOUCHES THE DATABASE
+   * ==========================================================================
+   *
+   * Resolving the account, opening the session and writing the audit row all require
+   * PostgreSQL. When it is unreachable, every one of them throws.
+   *
+   * A throw here would skip the `response()` helper entirely, so the handshake cookie
+   * would survive the failed attempt -- and the comment in that helper promises it is
+   * single-use WHATEVER the outcome. Catching is what keeps that true.
+   *
+   * A separate outcome from FAILURE, and safe to distinguish: the generic-refusal rule
+   * exists so this page cannot be asked which addresses hold accounts, and an outage
+   * answers identically for every address, so it reveals nothing about any of them.
+   * Telling somebody "try again" when the truth is "our database is down" would just
+   * send them to look for a mistake they did not make.
+   *
+   * The error itself is deliberately NOT logged. A pg error carries parameter values
+   * in its detail fields, and in this application those parameters are patient data.
    */
-  const [linked] = await db
-    .select({ userId: userIdentity.userId })
-    .from(userIdentity)
-    .where(
-      and(eq(userIdentity.provider, 'google'), eq(userIdentity.subject, identity.subject)),
-    )
-    .limit(1);
+  try {
+    const db = getDb();
+    const { ip: rawIp, userAgent } = await requestMeta();
+    const ip = safeInet(rawIp);
 
-  const [account] = linked
-    ? await db
-        .select({
-          id: userAccount.id,
-          clinicId: userAccount.clinicId,
-          status: userAccount.status,
-          lockedUntil: userAccount.lockedUntil,
-        })
-        .from(userAccount)
-        .where(and(eq(userAccount.id, linked.userId), isNull(userAccount.archivedAt)))
-        .limit(1)
-    : await db
-        .select({
-          id: userAccount.id,
-          clinicId: userAccount.clinicId,
-          status: userAccount.status,
-          lockedUntil: userAccount.lockedUntil,
-        })
-        .from(userAccount)
-        .where(
-          and(eq(userAccount.email, identity.email), isNull(userAccount.archivedAt)),
-        )
-        .limit(1);
+    /*
+     * Resolve the account. An existing link wins over the email, because `sub` is stable and
+     * an email is not: if a departing employee's address is reassigned to their replacement,
+     * matching on email would hand over the old account.
+     */
+    const [linked] = await db
+      .select({ userId: userIdentity.userId })
+      .from(userIdentity)
+      .where(
+        and(
+          eq(userIdentity.provider, 'google'),
+          eq(userIdentity.subject, identity.subject),
+        ),
+      )
+      .limit(1);
 
-  await recordAttempt({
-    email: identity.email,
-    ip,
-    ...(account ? { userId: account.id, clinicId: account.clinicId } : {}),
-    succeeded: Boolean(account) && account!.status === 'active',
-  });
+    const [account] = linked
+      ? await db
+          .select({
+            id: userAccount.id,
+            clinicId: userAccount.clinicId,
+            status: userAccount.status,
+            lockedUntil: userAccount.lockedUntil,
+          })
+          .from(userAccount)
+          .where(and(eq(userAccount.id, linked.userId), isNull(userAccount.archivedAt)))
+          .limit(1)
+      : await db
+          .select({
+            id: userAccount.id,
+            clinicId: userAccount.clinicId,
+            status: userAccount.status,
+            lockedUntil: userAccount.lockedUntil,
+          })
+          .from(userAccount)
+          .where(
+            and(eq(userAccount.email, identity.email), isNull(userAccount.archivedAt)),
+          )
+          .limit(1);
 
-  /* No account: the refusal that makes this a link rather than a sign-up. */
-  if (!account) return response(FAILURE);
-
-  const now = new Date();
-  const locked = account.lockedUntil !== null && account.lockedUntil > now;
-  if (locked || account.status !== 'active') {
-    await db.transaction(async (tx) => {
-      await writeAuditEvent(tx, {
-        clinicId: account.clinicId,
-        actorUserId: account.id,
-        actorIp: ip,
-        actorUserAgent: userAgent,
-        action: 'auth.login',
-        outcome: 'denied',
-        entityType: 'user_account',
-        entityId: account.id,
-        metadata: { via: 'google', reason: locked ? 'locked' : account.status },
-      });
+    await recordAttempt({
+      email: identity.email,
+      ip,
+      ...(account ? { userId: account.id, clinicId: account.clinicId } : {}),
+      succeeded: Boolean(account) && account!.status === 'active',
     });
-    return response(FAILURE);
-  }
 
-  const roleCodes = await db
-    .select({ code: role.code })
-    .from(userRole)
-    .innerJoin(role, eq(role.id, userRole.roleId))
-    .where(and(eq(userRole.userId, account.id), isNull(userRole.revokedAt)));
+    /* No account: the refusal that makes this a link rather than a sign-up. */
+    if (!account) return response(FAILURE);
 
-  /* Session, identity link and audit row commit together. A session that exists without a
-     log line is the thing the audit is meant to make impossible. */
-  const created = await db.transaction(async (tx) => {
-    await tx
-      .update(userAccount)
-      .set({ failedLoginCount: 0, lockedUntil: null, lastLoginAt: now })
-      .where(eq(userAccount.id, account.id));
-
-    if (linked) {
-      await tx
-        .update(userIdentity)
-        .set({ lastUsedAt: now })
-        .where(
-          and(
-            eq(userIdentity.provider, 'google'),
-            eq(userIdentity.subject, identity.subject),
-          ),
-        );
-    } else {
-      /* First sign-in for this account: record the link. The administrator created the
-         account; this only remembers which Google subject may use it from now on. */
-      await tx.insert(userIdentity).values({
-        userId: account.id,
-        provider: 'google',
-        subject: identity.subject,
-        emailAtLink: identity.email,
-        lastUsedAt: now,
+    const now = new Date();
+    const locked = account.lockedUntil !== null && account.lockedUntil > now;
+    if (locked || account.status !== 'active') {
+      await db.transaction(async (tx) => {
+        await writeAuditEvent(tx, {
+          clinicId: account.clinicId,
+          actorUserId: account.id,
+          actorIp: ip,
+          actorUserAgent: userAgent,
+          action: 'auth.login',
+          outcome: 'denied',
+          entityType: 'user_account',
+          entityId: account.id,
+          metadata: { via: 'google', reason: locked ? 'locked' : account.status },
+        });
       });
-
-      await writeAuditEvent(tx, {
-        clinicId: account.clinicId,
-        actorUserId: account.id,
-        actorIp: ip,
-        actorUserAgent: userAgent,
-        action: 'auth.login',
-        outcome: 'allowed',
-        entityType: 'user_identity',
-        entityId: account.id,
-        metadata: { via: 'google', event: 'identity_linked' },
-      });
+      return response(FAILURE);
     }
 
-    const newSession = await createSession(tx, account.id, ip, userAgent);
+    const roleCodes = await db
+      .select({ code: role.code })
+      .from(userRole)
+      .innerJoin(role, eq(role.id, userRole.roleId))
+      .where(and(eq(userRole.userId, account.id), isNull(userRole.revokedAt)));
 
-    await writeAuditEvent(tx, {
-      clinicId: account.clinicId,
-      actorUserId: account.id,
-      actorRoleCodes: roleCodes.map((r) => r.code),
-      actorIp: ip,
-      actorUserAgent: userAgent,
-      sessionId: newSession.id,
-      action: 'auth.login',
-      outcome: 'allowed',
-      entityType: 'session',
-      entityId: newSession.id,
-      metadata: { via: 'google' },
+    /* Session, identity link and audit row commit together. A session that exists without a
+       log line is the thing the audit is meant to make impossible. */
+    const created = await db.transaction(async (tx) => {
+      await tx
+        .update(userAccount)
+        .set({ failedLoginCount: 0, lockedUntil: null, lastLoginAt: now })
+        .where(eq(userAccount.id, account.id));
+
+      if (linked) {
+        await tx
+          .update(userIdentity)
+          .set({ lastUsedAt: now })
+          .where(
+            and(
+              eq(userIdentity.provider, 'google'),
+              eq(userIdentity.subject, identity.subject),
+            ),
+          );
+      } else {
+        /* First sign-in for this account: record the link. The administrator created the
+           account; this only remembers which Google subject may use it from now on. */
+        await tx.insert(userIdentity).values({
+          userId: account.id,
+          provider: 'google',
+          subject: identity.subject,
+          emailAtLink: identity.email,
+          lastUsedAt: now,
+        });
+
+        await writeAuditEvent(tx, {
+          clinicId: account.clinicId,
+          actorUserId: account.id,
+          actorIp: ip,
+          actorUserAgent: userAgent,
+          /* Its own action, not `auth.login` with a flag in metadata: linking an external
+             identity to a staff account is a distinct security event and has to be
+             answerable by query rather than by reading JSON out of a thousand logins. */
+          action: 'identity.link',
+          outcome: 'allowed',
+          entityType: 'user_identity',
+          entityId: account.id,
+          metadata: { provider: 'google' },
+        });
+      }
+
+      const newSession = await createSession(tx, account.id, ip, userAgent);
+
+      await writeAuditEvent(tx, {
+        clinicId: account.clinicId,
+        actorUserId: account.id,
+        actorRoleCodes: roleCodes.map((r) => r.code),
+        actorIp: ip,
+        actorUserAgent: userAgent,
+        sessionId: newSession.id,
+        action: 'auth.login',
+        outcome: 'allowed',
+        entityType: 'session',
+        entityId: newSession.id,
+        metadata: { via: 'google' },
+      });
+
+      return newSession;
     });
 
-    return newSession;
-  });
-
-  const success = response('/dashboard');
-  success.cookies.set(sessionCookieName(), created.token, {
-    ...sessionCookieOptions(),
-    expires: created.absoluteExpiresAt,
-  });
-  return success;
+    const success = response('/dashboard');
+    success.cookies.set(sessionCookieName(), created.token, {
+      ...sessionCookieOptions(),
+      expires: created.absoluteExpiresAt,
+    });
+    return success;
+  } catch {
+    return response(UNAVAILABLE);
+  }
 }

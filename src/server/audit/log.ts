@@ -48,6 +48,7 @@ export type AuditEntityType =
   | 'invoice_line'
   | 'payment'
   | 'user_identity'
+  | 'patient_identity'
   | 'audit_event';
 
 export type AuditInput = {

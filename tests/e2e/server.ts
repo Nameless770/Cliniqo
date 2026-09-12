@@ -79,6 +79,13 @@ export async function startApp(): Promise<RunningApp> {
     APP_URL: baseUrl,
     GOOGLE_CLIENT_ID: 'e2e-client-id.apps.googleusercontent.com',
     GOOGLE_CLIENT_SECRET: 'e2e-client-secret-never-used',
+    /*
+     * And the patient half switched ON, for the same reason. It is off by default — a
+     * deployment that has not enabled it renders no button and its routes return early,
+     * so leaving it off here would make every portal SSO assertion pass by the feature
+     * being absent rather than by its checks running.
+     */
+    PORTAL_GOOGLE_SIGN_IN: 'true',
     DATABASE_URL: withDatabase(required('DATABASE_URL'), TEST_DB),
     DATABASE_MIGRATION_URL: withDatabase(required('DATABASE_MIGRATION_URL'), TEST_DB),
     /* The journeys assert on triage behaviour, and they must assert on the engine that
@@ -119,7 +126,9 @@ export async function startApp(): Promise<RunningApp> {
       throw new Error(`app exited early (${child.exitCode}):\n${log.join('')}`);
     }
     try {
-      const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(`${baseUrl}/api/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (res.ok) {
         return {
           baseUrl,
