@@ -8,6 +8,7 @@ import { getEnv } from '@/env/server';
 import { PHI_ACTIONS, type AuditAction } from '@/server/audit/actions';
 
 import { hasActiveBreakGlass } from './break-glass';
+import { describeError } from '@/lib/pg-errors';
 
 /**
  * PHI read budget — the fix for security review finding F1.
@@ -125,10 +126,7 @@ export async function checkReadBudget(actorUserId: string): Promise<BudgetVerdic
         }
       : { allowed: true };
   } catch (error) {
-    console.error(
-      '[read-budget] count failed, failing open:',
-      error instanceof Error ? error.message : 'unknown error',
-    );
+    console.error('[read-budget] count failed, failing open:', describeError(error));
     return { allowed: true };
   }
 }

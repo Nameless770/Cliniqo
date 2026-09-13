@@ -7,6 +7,7 @@ import type { Permission } from '@/lib/permissions';
 import { writeAuditEvent, type AuditEntityType } from '@/server/audit/log';
 
 import { getSession, requestMeta, safeInet, type ActiveSession } from './session';
+import { describeError } from '@/lib/pg-errors';
 
 /**
  * THE authorization mechanism.
@@ -97,10 +98,7 @@ async function auditDenial(
       });
     });
   } catch (error) {
-    console.error(
-      '[authz] failed to record denial:',
-      error instanceof Error ? error.message : 'unknown error',
-    );
+    console.error('[authz] failed to record denial:', describeError(error));
   }
 }
 

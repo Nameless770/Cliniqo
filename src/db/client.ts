@@ -15,6 +15,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, types } from 'pg';
 
 import { getEnv, type ServerEnv } from '@/env/server';
+import { describeError } from '@/lib/pg-errors';
 
 import * as schema from './schema';
 
@@ -81,7 +82,7 @@ function createPool(env: ServerEnv): Pool {
    * detail fields, and in this application those parameters are patient data.
    */
   pool.on('error', (error) => {
-    console.error('[db] idle client error:', error.message);
+    console.error('[db] idle client error:', describeError(error));
   });
 
   return pool;

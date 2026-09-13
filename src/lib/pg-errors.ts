@@ -55,3 +55,45 @@ export function isSlotContention(error: unknown): boolean {
   const code = sqlStateOf(error);
   return code !== undefined && SLOT_CONTENTION_CODES.has(code);
 }
+
+/**
+ * A PHI-free description of a thrown error, for a server log line.
+ *
+ * ==========================================================================
+ * CODES ONLY — NEVER `message`
+ * ==========================================================================
+ *
+ * Measured, not assumed: Drizzle's `DrizzleQueryError` builds its message as the SQL plus
+ * `params:` — every bound value, verbatim. A failed query about a patient logs that patient's
+ * email, date of birth, or note text if anything prints `error.message`. PostgreSQL's own
+ * messages do the same for bad input (`invalid input syntax for type uuid: "…"`), and its
+ * `detail` quotes the offending row (`Key (email)=(…) already exists`).
+ *
+ * So this returns the error's class and its CODE, walking `cause` because Drizzle wraps the
+ * driver error that carries it: a SQLSTATE such as `23505`, or a Node errno such as
+ * `ECONNREFUSED`. That is enough to tell an outage from a constraint violation from a bug,
+ * and it cannot contain anyone's data — the code is validated against a strict shape
+ * before it is returned, so even a hostile `code` property cannot smuggle text through.
+ */
+export function describeError(error: unknown): string {
+  const chain: string[] = [];
+  let current: unknown = error;
+
+  for (
+    let depth = 0;
+    depth < 4 && current !== null && current !== undefined;
+    depth += 1
+  ) {
+    const name =
+      typeof current === 'object' && current.constructor
+        ? current.constructor.name
+        : typeof current;
+    const raw = (current as { code?: unknown }).code;
+    const code = typeof raw === 'string' && /^[A-Z0-9_]{2,40}$/.test(raw) ? raw : null;
+
+    chain.push(code ? `${name}(${code})` : name);
+    current = (current as { cause?: unknown }).cause;
+  }
+
+  return chain.join(' <- ') || 'unknown';
+}

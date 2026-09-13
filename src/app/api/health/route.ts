@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
+import { describeError } from '@/lib/pg-errors';
 
 /**
  * Liveness / readiness probe.
@@ -27,10 +28,7 @@ export async function GET() {
     );
   } catch (error) {
     // Logged server-side for operators; never returned to the caller.
-    console.error(
-      '[health] database check failed:',
-      error instanceof Error ? error.message : 'unknown error',
-    );
+    console.error('[health] database check failed:', describeError(error));
 
     return Response.json(
       { status: 'unavailable' },

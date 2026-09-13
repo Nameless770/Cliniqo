@@ -1259,8 +1259,10 @@ void randomUUID;
   ]) {
     check(
       'Google sign-in',
-      `a database failure in the ${name} callback still clears the handshake`,
-      /} catch \{\s*return response\(UNAVAILABLE\);/.test(stripComments(source)),
+      `a database failure in the ${name} callback clears the handshake and logs only a code`,
+      /} catch \(error\) \{\s*console\.error\([^;]*describeError\(error\)\);\s*return response\(UNAVAILABLE\);/.test(
+        stripComments(source),
+      ),
     );
   }
 
@@ -1272,6 +1274,40 @@ void randomUUID;
     'Google sign-in',
     'the portal callback is rate limited like the password login',
     /checkIpRateLimit/.test(portalCallback) && /recordAttempt/.test(portalCallback),
+  );
+}
+
+/* ------------------------------------------------------------ log exhaust */
+
+/*
+ * No error MESSAGE reaches a log line.
+ *
+ * Measured: Drizzle's `DrizzleQueryError` message is the SQL plus every bound parameter.
+ * Four sites logged `error.message` from a failed audit insert, whose parameters include
+ * `purpose` — the free text a clinician types to justify emergency access. A database blip
+ * during a break-glass request would have written that justification into the application
+ * log. `describeError` logs the class and code instead; this keeps it that way.
+ */
+{
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry.name)) {
+        const code = stripComments(read(full));
+        for (const m of code.matchAll(/console\.\w+\(([^;]*)\);/g)) {
+          if (/\.message\b/.test(m[1])) offenders.push(full.replace(/^src\//, ''));
+        }
+      }
+    }
+  };
+  walk('src');
+
+  check(
+    'Log exhaust',
+    `no log line prints an error message${offenders.length ? ` (found in: ${[...new Set(offenders)].join(', ')})` : ''}`,
+    offenders.length === 0,
   );
 }
 

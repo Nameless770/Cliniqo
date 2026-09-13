@@ -12,6 +12,7 @@ import { requirePermission, type AuthzContext } from '@/server/auth/authorize';
 import { requestMeta, safeInet, type ActiveSession } from '@/server/auth/session';
 
 import { checkReadBudget, isCountedRead } from './read-budget';
+import { describeError } from '@/lib/pg-errors';
 
 /**
  * The audited data-access layer.
@@ -142,10 +143,7 @@ async function auditOutOfBand(
     });
   } catch (error) {
     // Never mask the original failure with a logging failure.
-    console.error(
-      '[audit] failed to record failed operation:',
-      error instanceof Error ? error.message : 'unknown error',
-    );
+    console.error('[audit] failed to record failed operation:', describeError(error));
   }
 }
 
@@ -223,10 +221,7 @@ async function auditedOperation<T>(
           });
         });
       } catch (error) {
-        console.error(
-          '[audit] failed to record budget refusal:',
-          error instanceof Error ? error.message : 'unknown error',
-        );
+        console.error('[audit] failed to record budget refusal:', describeError(error));
       }
 
       throw new ReadBudgetExceededError();

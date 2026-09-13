@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { describeError } from '@/lib/pg-errors';
 import {
   exchangeCode,
   statesMatch,
@@ -107,8 +108,10 @@ export async function GET(request: NextRequest): Promise<Response> {
    * Telling somebody "try again" when the truth is "our database is down" would just
    * send them to look for a mistake they did not make.
    *
-   * The error itself is deliberately NOT logged. A pg error carries parameter values
-   * in its detail fields, and in this application those parameters are patient data.
+   * Logged as a CODE, never as a message — see `describeError`. The first version logged
+   * nothing at all, which made a plain database outage indistinguishable from a bug: the
+   * page said "try again shortly" and the server console said nothing. A code is enough to
+   * tell `ECONNREFUSED` from `23505`, and cannot carry the email address this path handles.
    */
   try {
     const { ip: rawIp, userAgent } = await requestMeta();
@@ -159,7 +162,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       expires: result.expiresAt,
     });
     return success;
-  } catch {
+  } catch (error) {
+    console.error('[auth] portal google callback failed:', describeError(error));
     return response(UNAVAILABLE);
   }
 }
