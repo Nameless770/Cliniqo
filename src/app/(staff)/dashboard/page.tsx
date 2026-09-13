@@ -66,7 +66,18 @@ function Stat({
                 : 'var(--text-primary)',
         }}
       >
-        {value}
+        {/*
+          The real number for assistive technology and for anyone copying it; the
+          counting copy beside it is decoration and is hidden from both. See `.cq-count`
+          in globals.css — the count-up is CSS alone, so this page stays a Server
+          Component and there is no flash of the final figure snapping back to zero.
+        */}
+        <span className="sr-only">{value}</span>
+        <span
+          aria-hidden="true"
+          className="cq-count"
+          style={{ '--cq-n': value } as React.CSSProperties}
+        />
       </strong>
       {hint ? (
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>

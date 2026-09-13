@@ -460,3 +460,137 @@ describe('Patient Google sign-in', () => {
     expect([404, 405]).toContain(response.status);
   });
 });
+
+/* ---------------------------------------------------------------- motion layer */
+
+describe('the motion layer', () => {
+  /*
+   * The second version of the design study is almost entirely movement, and movement is
+   * the easiest thing to ship broken without noticing: the page still works, it just no
+   * longer does the thing. These pin the markup each animation hangs off, against the real
+   * production build, and the two places it carries a rule that is not decoration — who
+   * sees the break-glass badge, and that a live status is only claimed when it is true.
+   */
+  let startedLocalDate: string;
+
+  beforeAll(async () => {
+    /*
+     * One appointment under way right now, and one emergency grant awaiting review. Both
+     * synthetic; both written straight to the database because what is under test is how
+     * the pages DRAW them, not how they are created.
+     */
+    const startsAt = new Date(Date.now() - 5 * 60_000);
+    const endsAt = new Date(Date.now() + 25 * 60_000);
+    await appPool.query(
+      `INSERT INTO appointment (clinic_id, patient_id, provider_user_id, appointment_type_id,
+                                during, status)
+       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), 'in_progress')`,
+      [
+        cast.clinicId,
+        cast.patientId,
+        cast.doctorId,
+        cast.appointmentTypeId,
+        startsAt.toISOString(),
+        endsAt.toISOString(),
+      ],
+    );
+    // The schedule's day view for the day it STARTED, in the clinic's zone.
+    startedLocalDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(startsAt);
+
+    await appPool.query(
+      `INSERT INTO break_glass_grant (clinic_id, user_id, patient_id, reason, expires_at)
+       VALUES ($1, $2, $3, 'E2E: synthetic emergency access for the review badge',
+               now() + interval '1 hour')`,
+      [cast.clinicId, cast.doctorId, cast.patientId],
+    );
+  });
+
+  it('wraps staff and portal screens in the route transition', async () => {
+    const staff = visitor();
+    const dashboard = await signIn(staff, '/login', cast.adminEmail);
+    expect(dashboard.html).toContain('class="cq-screen"');
+
+    const patient = visitor();
+    const portal = await signIn(patient, '/portal/login', cast.patientEmail);
+    expect(portal.html).toContain('class="cq-screen"');
+  });
+
+  it('counts the dashboard up in CSS, with the true figure beside every counter', async () => {
+    const session = visitor();
+    const page = await signIn(session, '/login', cast.adminEmail);
+
+    /*
+     * Each animated counter must carry the same number as the screen-reader copy next to
+     * it. If they drifted apart, a sighted user and a screen-reader user would be told
+     * different things about the clinic — and nothing else would notice.
+     */
+    const pairs = [
+      ...page.html.matchAll(
+        /<span class="sr-only">(\d+)<\/span><span aria-hidden="true" class="cq-count" style="--cq-n:(\d+)"/g,
+      ),
+    ];
+    expect(pairs.length, 'dashboard tiles render counters').toBeGreaterThanOrEqual(8);
+    for (const [, spoken, animated] of pairs) expect(animated).toBe(spoken);
+  });
+
+  it('shows the break-glass badge to a reviewer, and to nobody else', async () => {
+    const admin = visitor();
+    const adminPage = await signIn(admin, '/login', cast.adminEmail);
+    expect(text(adminPage.html)).toMatch(/Emergency access\s*1\s*, 1 awaiting review/);
+    expect(adminPage.html).toContain('cq-pulse');
+
+    /*
+     * The reason the badge's permission check lives inside the data function rather than
+     * in the layout: the layout runs for EVERY role. A receptionist must not learn from
+     * the sidebar that emergency access to someone's record is waiting to be reviewed.
+     */
+    const reception = visitor();
+    const receptionPage = await signIn(reception, '/login', cast.receptionEmail);
+    expect(text(receptionPage.html)).not.toMatch(/awaiting review/);
+    expect(receptionPage.html).not.toContain('cq-pulse');
+
+    /*
+     * The two assertions above are NOT enough, and were once all this test had. The Nav
+     * also drops items a role may not use, so a receptionist never SEES the badge even if
+     * the count is fetched — with the permission check deleted, this test still passed.
+     * What the check actually prevents is the count being computed and handed to the Nav
+     * Client Component, where it is serialised into the page source for anyone to read.
+     * So assert on the payload, not the pixels: the admin's page carries the count, and
+     * the receptionist's must not carry it at all.
+     */
+    /* The flight payload sits inside a JS string, so its quotes arrive as \" in the HTML. */
+    const badgePayload = /\\?"\/break-glass\\?":\s*1/;
+    expect(adminPage.html).toMatch(badgePayload);
+    expect(receptionPage.html).not.toMatch(badgePayload);
+  });
+
+  it('rings the appointment that is in progress, and only that one', async () => {
+    const session = visitor();
+    await signIn(session, '/login', cast.adminEmail);
+    const page = await session.get(`/schedule?date=${startedLocalDate}`);
+
+    expect(page.status).toBe(200);
+    /*
+     * Counted as rendered ATTRIBUTES. The raw HTML also carries Next's serialised component
+     * tree for hydration, which names the same class a second time as `"className"` — a
+     * bare substring count sees every ring twice.
+     */
+    expect(page.html.match(/class="cq-live-ring"/g)?.length).toBe(1);
+  });
+
+  it('gives the portal a masthead that states whether the clinic is open', async () => {
+    const session = visitor();
+    const page = await signIn(session, '/portal/login', cast.patientEmail);
+    const body = text(page.html);
+
+    expect(body).toMatch(/Open now|Closed now/);
+    expect(body).toMatch(/\d{2}:\d{2}(:\d{2})? clinic time/);
+    // The seeded appointment is still under way, so it is the patient's next one.
+    expect(body).toMatch(/Next: /);
+  });
+});

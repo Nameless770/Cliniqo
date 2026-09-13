@@ -22,13 +22,15 @@
   border-radius: var(--radius-md);
   background: var(--bg-raised);
   box-shadow: var(--shadow-lg);
-  animation: slide-in var(--duration-base) var(--ease);
+  /* The study's rise: further, slower, and on an overshoot-free spring curve, so a toast
+     reads as arriving rather than blinking on. */
+  animation: slide-in 340ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @keyframes slide-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(14px);
   }
 }
 

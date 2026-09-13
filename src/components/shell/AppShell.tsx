@@ -66,6 +66,11 @@ export type AppShellProps = {
    */
   permissions: readonly string[];
   clinicName: string;
+  /**
+   * Counts to show beside navigation items, keyed by href. Numbers only — this crosses
+   * into the Nav Client Component, and nothing here identifies a person or a record.
+   */
+  badges?: Readonly<Record<string, number>>;
   children: React.ReactNode;
 };
 
@@ -81,6 +86,7 @@ export function AppShell({
   roles,
   permissions,
   clinicName,
+  badges = {},
   children,
 }: AppShellProps) {
   const roleLabel = roles.map((role) => ROLE_LABELS[role]).join(' · ');
@@ -135,7 +141,7 @@ export function AppShell({
         </header>
 
         <div className={styles.body}>
-          <Nav permissions={permissions} />
+          <Nav permissions={permissions} badges={badges} />
 
           {/* tabIndex -1 so the skip link can move focus here, not just scroll. */}
           <main id="main" className={styles.main} tabIndex={-1}>

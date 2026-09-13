@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Fragment } from 'react';
 
 import { Badge, EmptyState } from '@/components/ui';
 import {
@@ -15,6 +16,7 @@ import {
   zonedDayRange,
   zonedWeekRange,
 } from '@/lib/clinic-time';
+import { firstToStartToday } from '@/lib/clinic-now';
 import { can } from '@/lib/permissions';
 import { guardPage } from '@/server/auth/authorize';
 import { getSchedule } from '@/server/data-access/appointments';
@@ -118,6 +120,17 @@ export default async function SchedulePage({
 
   const step = input.view === 'week' ? 7 : 1;
 
+  /*
+   * Where "now" falls in today's list: just above the first appointment that has not yet
+   * started. Computed at render in the clinic's zone, so it is right when the page is
+   * drawn and does not creep while it sits open — it marks a position BETWEEN rows, not a
+   * point on a timeline, and only moves when time passes an appointment's start. When
+   * every appointment today has already begun there is nothing to mark, and no line.
+   */
+  const now = new Date();
+  const nowLabel = formatTimeInZone(now, timeZone);
+  const nextToStartId = firstToStartToday(entries, now, timeZone);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
       <div
@@ -141,8 +154,8 @@ export default async function SchedulePage({
             }}
           >
             {entries.length} appointment{entries.length === 1 ? '' : 's'}
-            {providerFilter && !input.providerUserId ? ' · your list' : ''} · times shown in{' '}
-            {timeZone}
+            {providerFilter && !input.providerUserId ? ' · your list' : ''} · times shown
+            in {timeZone}
           </p>
         </div>
         {mayReschedule ? (
@@ -226,72 +239,131 @@ export default async function SchedulePage({
               }}
             >
               {dayEntries.map((entry) => (
-                <li
-                  key={entry.id}
-                  style={{
-                    display: 'flex',
-                    gap: 'var(--space-4)',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    padding: 'var(--space-3) var(--space-4)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-lg)',
-                    background: 'var(--bg-surface)',
-                    opacity: entry.status === 'cancelled' ? 0.6 : 1,
-                  }}
-                >
-                  <span
+                <Fragment key={entry.id}>
+                  {entry.id === nextToStartId ? (
+                    <li
+                      className="cq-nowline"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-3)',
+                        margin: '2px 0',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 'var(--weight-semibold)',
+                          letterSpacing: '0.12em',
+                          textTransform: 'uppercase',
+                          color: 'var(--accent-2-700)',
+                          fontVariantNumeric: 'tabular-nums',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Now {nowLabel}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          flex: 1,
+                          height: '2px',
+                          background: 'var(--accent-2-700)',
+                          position: 'relative',
+                        }}
+                      >
+                        <span
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: 'var(--accent-2-700)',
+                          }}
+                        />
+                      </span>
+                    </li>
+                  ) : null}
+                  <li
+                    /* Pulses only while the visit is actually under way — the one row on
+                     the page describing something happening at this moment. */
+                    className={
+                      entry.status === 'in_progress' ? 'cq-live-ring' : undefined
+                    }
                     style={{
-                      fontVariantNumeric: 'tabular-nums',
-                      fontWeight: 'var(--weight-semibold)',
-                      minWidth: '7.5rem',
+                      display: 'flex',
+                      gap: 'var(--space-4)',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      padding: 'var(--space-3) var(--space-4)',
+                      border: `1px solid ${
+                        entry.status === 'in_progress'
+                          ? 'var(--accent-600)'
+                          : 'var(--border-subtle)'
+                      }`,
+                      borderRadius: 'var(--radius-lg)',
+                      background: 'var(--bg-surface)',
+                      opacity: entry.status === 'cancelled' ? 0.6 : 1,
                     }}
                   >
-                    {formatTimeInZone(entry.startsAt, timeZone)}–
-                    {formatTimeInZone(entry.endsAt, timeZone)}
-                  </span>
-
-                  <span style={{ flex: '1 1 14rem', minWidth: 0 }}>
-                    <Link href={`/patients/${entry.patientId}`}>{entry.patientName}</Link>
                     <span
                       style={{
-                        color: 'var(--text-muted)',
                         fontVariantNumeric: 'tabular-nums',
+                        fontWeight: 'var(--weight-semibold)',
+                        minWidth: '7.5rem',
                       }}
                     >
-                      {' '}
-                      {entry.patientMrn}
+                      {formatTimeInZone(entry.startsAt, timeZone)}–
+                      {formatTimeInZone(entry.endsAt, timeZone)}
                     </span>
-                    <br />
-                    <span
-                      style={{
-                        fontSize: 'var(--text-xs)',
-                        color: 'var(--text-secondary)',
-                      }}
-                    >
-                      {entry.typeName} · {entry.providerName}
-                      {entry.bookingNote ? ` · ${entry.bookingNote}` : ''}
+
+                    <span style={{ flex: '1 1 14rem', minWidth: 0 }}>
+                      <Link href={`/patients/${entry.patientId}`}>
+                        {entry.patientName}
+                      </Link>
+                      <span
+                        style={{
+                          color: 'var(--text-muted)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {' '}
+                        {entry.patientMrn}
+                      </span>
+                      <br />
+                      <span
+                        style={{
+                          fontSize: 'var(--text-xs)',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        {entry.typeName} · {entry.providerName}
+                        {entry.bookingNote ? ` · ${entry.bookingNote}` : ''}
+                      </span>
                     </span>
-                  </span>
 
-                  <Badge tone={statusTone(entry.status)}>
-                    {APPOINTMENT_STATUS_LABELS[entry.status]}
-                  </Badge>
+                    <Badge tone={statusTone(entry.status)}>
+                      {APPOINTMENT_STATUS_LABELS[entry.status]}
+                    </Badge>
 
-                  <StatusActions
-                    appointmentId={entry.id}
-                    patientId={entry.patientId}
-                    status={entry.status}
-                    startsAtLocal={formatWallClockInZone(entry.startsAt, timeZone)}
-                    durationMinutes={Math.round(
-                      (entry.endsAt.getTime() - entry.startsAt.getTime()) / 60_000,
-                    )}
-                    canCheckIn={mayCheckIn}
-                    canChangeStatus={mayChangeStatus}
-                    canCancel={mayCancel}
-                    canReschedule={mayReschedule}
-                  />
-                </li>
+                    <StatusActions
+                      appointmentId={entry.id}
+                      patientId={entry.patientId}
+                      status={entry.status}
+                      startsAtLocal={formatWallClockInZone(entry.startsAt, timeZone)}
+                      durationMinutes={Math.round(
+                        (entry.endsAt.getTime() - entry.startsAt.getTime()) / 60_000,
+                      )}
+                      canCheckIn={mayCheckIn}
+                      canChangeStatus={mayChangeStatus}
+                      canCancel={mayCancel}
+                      canReschedule={mayReschedule}
+                    />
+                  </li>
+                </Fragment>
               ))}
             </ul>
           </section>

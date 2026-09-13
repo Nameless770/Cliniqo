@@ -47,6 +47,7 @@ export function AppointmentActions({
       {state.message ? (
         <p
           role={state.ok ? 'status' : 'alert'}
+          className="cq-rowin"
           style={{
             margin: 0,
             padding: 'var(--space-2) var(--space-3)',
@@ -65,6 +66,7 @@ export function AppointmentActions({
           type="button"
           size="sm"
           variant="secondary"
+          className="cq-btn"
           onClick={() => {
             setRescheduling((open) => !open);
             setConfirming(false);
@@ -77,16 +79,24 @@ export function AppointmentActions({
         {confirming ? (
           <form
             action={cancelAction}
+            className="cq-rowin"
             style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
           >
             <input type="hidden" name="appointmentId" value={appointmentId} />
-            <Button type="submit" size="sm" variant="danger" loading={cancelling}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="danger"
+              className="cq-btn"
+              loading={cancelling}
+            >
               Yes, cancel it
             </Button>
             <Button
               type="button"
               size="sm"
               variant="ghost"
+              className="cq-btn"
               onClick={() => setConfirming(false)}
             >
               Keep it
@@ -97,6 +107,7 @@ export function AppointmentActions({
             type="button"
             size="sm"
             variant="ghost"
+            className="cq-btn"
             onClick={() => {
               setConfirming(true);
               setRescheduling(false);
@@ -110,6 +121,7 @@ export function AppointmentActions({
       {rescheduling ? (
         <form
           action={moveAction}
+          className="cq-rowin"
           style={{
             display: 'flex',
             gap: 'var(--space-2)',
@@ -127,7 +139,13 @@ export function AppointmentActions({
           >
             <Input name="startsAt" type="datetime-local" />
           </Field>
-          <Button type="submit" size="sm" variant="primary" loading={moving}>
+          <Button
+            type="submit"
+            size="sm"
+            variant="primary"
+            className="cq-btn"
+            loading={moving}
+          >
             Move appointment
           </Button>
         </form>

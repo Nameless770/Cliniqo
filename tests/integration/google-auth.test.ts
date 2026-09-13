@@ -71,7 +71,9 @@ describe('the Google authorization request', () => {
   it('sends the redirect URI built from configuration, not from a request', () => {
     const url = new URL(authorizeUrl(config, newHandshake()));
     expect(url.searchParams.get('redirect_uri')).toBe(config.redirectUri);
-    expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(url.origin + url.pathname).toBe(
+      'https://accounts.google.com/o/oauth2/v2/auth',
+    );
   });
 
   it('passes the hosted domain hint when one is configured', () => {
@@ -86,11 +88,35 @@ describe('the Google authorization request', () => {
 });
 
 describe('state comparison', () => {
+  /*
+   * Flip the last character to something it is NOT, rather than to a fixed letter.
+   *
+   * `state.slice(0, -1) + 'A'` looked like a one-character tamper and was a 1-in-16
+   * coin flip: 32 random bytes encode to 43 base64url characters, but the last one
+   * carries only 4 bits of payload, so exactly 16 of the 64 alphabet characters can
+   * ever appear there — 'A' among them. When the state happened to end in 'A' the
+   * "tampered" value was the ORIGINAL, statesMatch rightly returned true, and the test
+   * failed on a correct answer. Measured at 6.5% over 20,000 handshakes.
+   */
+  const tamper = (s: string): string => s.slice(0, -1) + (s.endsWith('A') ? 'E' : 'A');
+
   it('accepts a match and rejects everything else', () => {
     const { state } = newHandshake();
     expect(statesMatch(state, state)).toBe(true);
     expect(statesMatch(state, `${state}x`)).toBe(false);
     expect(statesMatch(state, '')).toBe(false);
-    expect(statesMatch(state, state.slice(0, -1) + 'A')).toBe(false);
+
+    const tampered = tamper(state);
+    // The guard the old version lacked: prove the tamper actually changed something.
+    expect(tampered).not.toBe(state);
+    expect(statesMatch(state, tampered)).toBe(false);
+  });
+
+  it('rejects a one-character tamper every time, not most of the time', () => {
+    /* 200 fresh handshakes. The old assertion would fail roughly a dozen of these. */
+    for (let i = 0; i < 200; i += 1) {
+      const { state } = newHandshake();
+      expect(statesMatch(state, tamper(state))).toBe(false);
+    }
   });
 });

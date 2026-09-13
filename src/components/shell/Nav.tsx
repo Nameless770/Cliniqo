@@ -19,7 +19,13 @@ import styles from './AppShell.module.css';
  * server action is still a public endpoint. Authorization is re-checked server-side on
  * every data operation — CLAUDE.md rule 2.
  */
-export function Nav({ permissions }: { permissions: readonly string[] }) {
+export function Nav({
+  permissions,
+  badges = {},
+}: {
+  permissions: readonly string[];
+  badges?: Readonly<Record<string, number>>;
+}) {
   const pathname = usePathname();
   const items = navItemsFor(permissions);
 
@@ -42,6 +48,19 @@ export function Nav({ permissions }: { permissions: readonly string[] }) {
                 aria-current={active ? 'page' : undefined}
               >
                 {item.label}
+                {badges[item.href] ? (
+                  <>
+                    {/*
+                      The number is decoration; the sentence is what a screen reader hears.
+                      Without it the link would be announced as "Emergency access 2", which
+                      says nothing about what the 2 is.
+                    */}
+                    <span className={`${styles.navBadge} cq-pulse`} aria-hidden="true">
+                      {badges[item.href]}
+                    </span>
+                    <span className="sr-only">, {badges[item.href]} awaiting review</span>
+                  </>
+                ) : null}
               </Link>
             </li>
           );

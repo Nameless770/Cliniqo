@@ -9,6 +9,7 @@ import { getPatientSession } from '@/server/portal/session';
 
 import { AppointmentActions } from './AppointmentActions';
 import { BookForm } from './BookForm';
+import { ClinicClock } from './ClinicClock';
 
 export const metadata = { title: 'Your appointments · Cliniqo' };
 export const dynamic = 'force-dynamic';
@@ -40,54 +41,90 @@ export default async function PortalHomePage({
   ]);
 
   const tz = session.clinicTimeZone;
+  const next = upcoming[0];
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 'var(--space-4)',
-          flexWrap: 'wrap',
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 'var(--text-xl)', margin: 0 }}>
-            Hello, {session.fullName}
-          </h1>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 'var(--text-sm)',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            {session.clinicName}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
-          <Link href="/portal/account" style={{ fontSize: 'var(--text-sm)' }}>
-            Your account
-          </Link>
-          <form action={portalLogoutAction}>
-            <button
-              type="submit"
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+        <header
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 'var(--space-4)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: 'var(--text-xl)', margin: 0 }}>
+              Hello, {session.fullName}
+            </h1>
+            <p
               style={{
-                padding: 'var(--space-1) var(--space-3)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--bg-surface)',
-                color: 'var(--text-secondary)',
+                margin: 0,
                 fontSize: 'var(--text-sm)',
-                cursor: 'pointer',
+                color: 'var(--text-secondary)',
               }}
             >
-              Sign out
-            </button>
-          </form>
+              {session.clinicName}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+            <Link href="/portal/account" style={{ fontSize: 'var(--text-sm)' }}>
+              Your account
+            </Link>
+            <form action={portalLogoutAction}>
+              <button
+                type="submit"
+                className="cq-btn"
+                style={{
+                  padding: 'var(--space-1) var(--space-3)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-surface)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--text-sm)',
+                  cursor: 'pointer',
+                }}
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        </header>
+
+        {/*
+        The masthead: a heavy rule over a light one, like a newspaper's dateline. The live
+        half — open or closed, and the clinic's clock — is a small Client Component fed
+        only clinic configuration. The patient's next appointment is theirs, so it is
+        rendered here by the server and never crosses into that island.
+      */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+            flexWrap: 'wrap',
+            borderTop: '2px solid var(--text-primary)',
+            borderBottom: '1px solid var(--text-primary)',
+            padding: '9px 0',
+          }}
+        >
+          <ClinicClock timeZone={tz} hours={options.hours} closures={options.closures} />
+          <span style={{ flex: 1 }} />
+          <span
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--text-secondary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {next
+              ? `Next: ${formatDateInZone(next.startsAt, tz)}, ${formatTimeInZone(next.startsAt, tz)}`
+              : 'No upcoming appointments'}
+          </span>
         </div>
-      </header>
+      </div>
 
       {/*
         Shown once, after the sign-in that created the link. It confirms what just
@@ -97,6 +134,7 @@ export default async function PortalHomePage({
       {linked === '1' ? (
         <p
           role="status"
+          className="cq-rowin"
           style={{
             margin: 0,
             padding: 'var(--space-3) var(--space-4)',
@@ -124,6 +162,8 @@ export default async function PortalHomePage({
       {/* --------------------------------------------------------- book */}
       <section
         style={{
+          /* The positioning context for the booking stamp BookForm lays over this card. */
+          position: 'relative',
           border: '1px solid var(--border-subtle)',
           borderRadius: 'var(--radius-lg)',
           background: 'var(--bg-surface)',
@@ -157,7 +197,12 @@ export default async function PortalHomePage({
           upcoming.map((a) => (
             <article
               key={a.id}
+              /* A row booked moments ago slides in, a beat after the booking stamp. See
+                 `justBooked` in the data layer for why it is a flag, not an id in a URL. */
+              className={a.justBooked ? 'cq-rowin' : undefined}
               style={{
+                /* Lands as the stamp over the booking card clears. */
+                animationDelay: a.justBooked ? '900ms' : undefined,
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-md)',
                 background: 'var(--bg-surface)',

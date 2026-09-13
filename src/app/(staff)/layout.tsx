@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { AppShell } from '@/components/shell/AppShell';
 import { getSession } from '@/server/auth/session';
+import { breakGlassReviewBadge } from '@/server/data-access/break-glass';
 
 /**
  * Route group `(staff)` — every authenticated route lives beneath this layout.
@@ -42,12 +43,16 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     if (pathname !== PASSWORD_CHANGE_PATH) redirect(PASSWORD_CHANGE_PATH);
   }
 
+  /* Null for anyone without `audit.read` — the function gates itself, see its comment. */
+  const pendingReviews = await breakGlassReviewBadge(active.permissions, active.clinicId);
+
   return (
     <AppShell
       userName={active.fullName}
       roles={active.roles}
       permissions={[...active.permissions]}
       clinicName={active.clinicName}
+      badges={pendingReviews ? { '/break-glass': pendingReviews } : {}}
     >
       {children}
     </AppShell>

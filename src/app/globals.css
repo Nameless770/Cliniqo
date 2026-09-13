@@ -106,9 +106,277 @@ textarea {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    /* A delayed entrance holds its start frame — usually invisible — for the whole delay.
+       Shortening the animation without zeroing this leaves content hidden, not calm. */
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * ==========================================================================
+ * MOTION — ported from the second version of the "Cliniqo Web" design study
+ * ==========================================================================
+ *
+ * Every rule here is DECORATION. Nothing reads state from an animation, nothing waits on
+ * one, and the reduced-motion block above removes all of it. A screen must be complete
+ * and correct with this whole section deleted.
+ *
+ * Utility classes rather than CSS Modules because the same handful of movements recur
+ * across staff and portal screens, and the study names them once (`cq-*`). They are
+ * applied by className only — no inline `animation:` strings in components, so a single
+ * reduced-motion rule reaches every one of them.
+ */
+
+/* --- Route change: the new screen settles in -------------------------------------- */
+
+@keyframes cq-fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/*
+ * `backwards`, NOT `both`, and that is load-bearing.
+ *
+ * A retained `transform` — even `translateY(0)` — makes this element the containing
+ * block for every `position: fixed` descendant, permanently. With `both`, anything fixed
+ * inside a page would quietly stop being fixed to the viewport the moment the screen
+ * finished fading in. `backwards` applies the start frame during the run and then lets
+ * the property go, so after 320ms the element has no transform at all.
+ */
+.cq-screen {
+  animation: cq-fade 320ms ease backwards;
+}
+
+/* --- Buttons: lift on hover, press on click --------------------------------------- */
+
+/*
+ * `button.cq-btn`, one type selector heavier than a bare class, and deliberately so. The
+ * shared Button component declares its own `transition` in a CSS Module that loads after
+ * this file; at equal specificity it wins, drops `transform` from the list, and the lift
+ * snaps instead of gliding. The extra weight settles it without an !important.
+ */
+button.cq-btn,
+a.cq-btn {
+  transition:
+    transform 130ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 130ms,
+    background-color 130ms,
+    border-color 130ms,
+    color 130ms;
+}
+
+.cq-btn:hover:not(:disabled) {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 16px -8px rgb(32 30 29 / 55%);
+}
+
+.cq-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 2px 6px -4px rgb(32 30 29 / 50%);
+}
+
+/* --- Things arriving ---------------------------------------------------------------- */
+
+@keyframes cq-slotin {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+.cq-slot {
+  animation: cq-slotin 300ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+@keyframes cq-rowin {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.cq-rowin {
+  animation: cq-rowin 340ms ease backwards;
+}
+
+/* --- Booking confirmed: the stamp and its check --------------------------------------- */
+
+@keyframes cq-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-8deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.08) rotate(2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+.cq-commit {
+  animation: cq-stamp 500ms cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+
+@keyframes cq-checkdraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.cq-check {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: cq-checkdraw 400ms 180ms ease forwards;
+}
+
+/* --- Live: something is happening right now ------------------------------------------ */
+
+@keyframes cq-live {
+  0% {
+    box-shadow: 0 0 0 0 rgb(17 134 172 / 50%);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgb(17 134 172 / 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(17 134 172 / 0%);
+  }
+}
+
+.cq-live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-600);
+  animation: cq-live 1.8s ease-out infinite;
+}
+
+/* The same ring on a whole row: an appointment that is in progress at this moment. */
+.cq-live-ring {
+  animation: cq-live 1.8s ease-out infinite;
+}
+
+@keyframes cq-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.cq-filldot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-2-700);
+  margin-right: 5px;
+  animation: cq-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes cq-nowline {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.cq-nowline {
+  animation: cq-nowline 2.2s ease-in-out infinite;
+}
+
+@keyframes cq-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.cq-pulse {
+  animation: cq-pulse 2s ease-in-out infinite;
+}
+
+/* --- Numbers counting up ---------------------------------------------------------------- */
+
+/*
+ * A count-up with NO JavaScript.
+ *
+ * The obvious version is a Client Component that animates 0 -> n in a requestAnimationFrame
+ * loop. But the server has already painted the real number before any script loads, so it
+ * would flash the final value, snap to 0, then count — and it would ship a component and a
+ * hydration boundary to the one screen whose whole brief is "counts only, leave nothing on
+ * the client".
+ *
+ * Registering the property as an <integer> is what lets the browser interpolate it; a
+ * counter then prints it. Browsers without @property see an unregistered property, which
+ * animates discretely: the tile shows 0 briefly and then the true value. The real number is
+ * always in the DOM beside it for assistive technology, and the animated copy is
+ * aria-hidden — a screen reader must never hear a count that is still climbing.
+ *
+ * Ease-out cubic over 760ms, as the study specifies.
+ */
+@property --cq-n {
+  syntax: '<integer>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes cq-count {
+  from {
+    --cq-n: 0;
+  }
+}
+
+.cq-count {
+  counter-reset: cq-n var(--cq-n);
+  animation: cq-count 760ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.cq-count::after {
+  content: counter(cq-n);
+}
+
+/* --- Everything interactive eases between states ------------------------------------------ */
+
+/*
+ * `:where()` gives this zero specificity, so any component that declares its own
+ * transition wins without needing to fight it.
+ */
+:where(button, select, input, textarea, a) {
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+/*
+ * The global reduced-motion rule above shortens every animation and transition, but a
+ * hover lift is not an animation — it is a transform, and it would still jump. For someone
+ * who has asked for less motion, the button should simply not move.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .cq-btn:hover:not(:disabled),
+  .cq-btn:active:not(:disabled) {
+    transform: none;
   }
 }
 

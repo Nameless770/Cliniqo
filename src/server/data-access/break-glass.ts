@@ -3,6 +3,7 @@ import 'server-only';
 import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
+import { can } from '@/lib/permissions';
 import { breakGlassGrant, patient, userAccount } from '@/db/schema';
 
 import { auditedRead, auditedWrite } from './audited';
@@ -258,4 +259,31 @@ export async function pendingBreakGlassCount(clinicId: string): Promise<number> 
     );
 
   return row?.value ?? 0;
+}
+
+/**
+ * The navigation badge: how many emergency-access grants are waiting for review.
+ *
+ * ==========================================================================
+ * THE PERMISSION CHECK IS HERE, NOT AT THE CALLER
+ * ==========================================================================
+ *
+ * `pendingBreakGlassCount` above has no check of its own — it was written for a dashboard
+ * tile that only an administrator's overview ever calls. This is reached from the staff
+ * LAYOUT, which runs for every signed-in role on every navigation, so the gate lives inside
+ * the function (CLAUDE.md rule 2) rather than trusting the layout to remember it.
+ *
+ * `audit.read`, because that is what the Emergency access page itself requires. A count is
+ * not PHI, but whether someone has recently broken glass is audit information: telling a
+ * receptionist that three emergency grants are awaiting review tells them something about
+ * who has been reading which records, and when.
+ *
+ * Returns null — not zero — for a caller who may not know. Zero is an answer.
+ */
+export async function breakGlassReviewBadge(
+  permissions: ReadonlySet<string> | readonly string[],
+  clinicId: string,
+): Promise<number | null> {
+  if (!can(permissions, 'audit.read')) return null;
+  return pendingBreakGlassCount(clinicId);
 }

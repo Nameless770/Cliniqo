@@ -66,9 +66,24 @@ export type MyAppointment = {
   status: string;
   typeName: string;
   providerName: string;
+  /**
+   * Booked within the last few seconds. Lets a row the patient has just booked slide into
+   * the list without carrying the new appointment's id through a URL or a client payload
+   * to animate it. A boolean rather than the timestamp: the page needs the answer, not
+   * the time.
+   */
+  justBooked: boolean;
 };
 
 export type MyAppointments = { upcoming: MyAppointment[]; past: MyAppointment[] };
+
+/*
+ * Long enough to cover the round trip from a booking to the list re-rendering, short
+ * enough that returning to the page later does not replay it. Measured against the
+ * database's `created_at`, so it also absorbs a few seconds of clock drift between the
+ * application host and PostgreSQL.
+ */
+const JUST_BOOKED_MS = 15_000;
 
 /**
  * The signed-in patient's own appointments, split into upcoming and past/cancelled.
@@ -88,6 +103,7 @@ export async function listMyAppointments(): Promise<MyAppointments> {
         status: appointment.status,
         typeName: appointmentType.displayName,
         providerName: userAccount.fullName,
+        createdAt: appointment.createdAt,
       })
       .from(appointment)
       .innerJoin(appointmentType, eq(appointmentType.id, appointment.appointmentTypeId))
@@ -119,6 +135,7 @@ export async function listMyAppointments(): Promise<MyAppointments> {
         status: r.status,
         typeName: r.typeName,
         providerName: r.providerName,
+        justBooked: now - r.createdAt.getTime() < JUST_BOOKED_MS,
       };
     });
 
@@ -138,6 +155,15 @@ export type BookingOptions = {
   types: { id: string; name: string; durationMinutes: number }[];
   providers: { id: string; name: string }[];
   hours: { dayOfWeek: number; opensAt: string; closesAt: string }[];
+  /**
+   * Clinic-wide closures overlapping the next 24 hours, as ISO instants.
+   *
+   * So the portal's "Open now" can be TRUE rather than merely consistent with the weekly
+   * hours: a bank holiday is a closure, not a change to the timetable, and a patient told
+   * the clinic is open on one may simply turn up. Instants only — never the `reason`,
+   * which is free text a member of staff typed and could say anything.
+   */
+  closures: { startsAt: string; endsAt: string }[];
 };
 
 /**
@@ -149,7 +175,7 @@ export async function getBookingOptions(): Promise<BookingOptions> {
   const session = await requirePatientSession();
   const db = getDb();
 
-  const [types, providers, hours] = await Promise.all([
+  const [types, providers, hours, closures] = await Promise.all([
     db
       .select({
         id: appointmentType.id,
@@ -188,9 +214,34 @@ export async function getBookingOptions(): Promise<BookingOptions> {
       .from(clinicHours)
       .where(eq(clinicHours.clinicId, session.clinicId))
       .orderBy(asc(clinicHours.dayOfWeek)),
+    db
+      .select({
+        /* node-pg parses timestamptz into a Date — typed as what actually arrives, the
+           same as the exceptions query in `getOpenSlots`. */
+        startsAt: sql<Date>`lower(${scheduleException.during})`,
+        endsAt: sql<Date>`upper(${scheduleException.during})`,
+      })
+      .from(scheduleException)
+      .where(
+        and(
+          eq(scheduleException.clinicId, session.clinicId),
+          /* Clinic-wide only. One clinician's leave does not close the clinic. */
+          isNull(scheduleException.providerUserId),
+          sql`${scheduleException.during} && tstzrange(now(), now() + interval '24 hours')`,
+        ),
+      ),
   ]);
 
-  return { clinicTimeZone: session.clinicTimeZone, types, providers, hours };
+  return {
+    clinicTimeZone: session.clinicTimeZone,
+    types,
+    providers,
+    hours,
+    closures: closures.map((c) => ({
+      startsAt: new Date(c.startsAt).toISOString(),
+      endsAt: new Date(c.endsAt).toISOString(),
+    })),
+  };
 }
 
 /* -------------------------------------------------------------------------- */

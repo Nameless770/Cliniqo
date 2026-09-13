@@ -87,8 +87,11 @@ describe('patient Google sign-in', () => {
   });
 
   it('records the authorization: when, from where, and in the audit log', async () => {
+    /* `host()`, not `::text`: an inet renders its netmask, so casting yields
+       "203.0.113.10/32" and an equality check on the bare address fails on a correctly
+       stored value. */
     const row = await ownerPool.query<{ linked_ip: string | null; subject: string }>(
-      `SELECT linked_ip::text, subject FROM patient_identity
+      `SELECT host(linked_ip) AS linked_ip, subject FROM patient_identity
         WHERE patient_account_id = $1 AND revoked_at IS NULL`,
       [accountId],
     );
