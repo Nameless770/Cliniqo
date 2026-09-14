@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
+import { signupClinicId } from '@/server/auth/pending-signup';
 import { portalGoogleConfig } from '@/server/portal/google';
 import { getPatientSession } from '@/server/portal/session';
 
@@ -20,6 +21,7 @@ export default async function PortalLoginPage({
   /* Null unless the clinic has switched patient Google sign-in on. Off by default — see
      `portalGoogleConfig` for why it is a separate decision from staff sign-in. */
   const google = portalGoogleConfig();
+  const signupOpen = Boolean(google && signupClinicId('portal'));
   const { error } = await searchParams;
 
   return (
@@ -35,8 +37,9 @@ export default async function PortalLoginPage({
             color: 'var(--text-secondary)',
           }}
         >
-          Sign in to see and book appointments. Your clinic sets up your account — if you
-          cannot sign in, contact them directly.
+          {signupOpen
+            ? 'Sign in to see and book appointments. New patients can create an account below — read what that shares first.'
+            : 'Sign in to see and book appointments. Your clinic sets up your account — if you cannot sign in, contact them directly.'}
         </p>
       </div>
 
@@ -173,8 +176,9 @@ export default async function PortalLoginPage({
                 color: 'var(--text-muted)',
               }}
             >
-              Only works if your clinic has already set up your portal account with the
-              same email address. Signing in with Google never creates one.
+              {signupOpen
+                ? 'No account yet? The same button creates one — a new patient record that the clinic confirms at your first visit.'
+                : 'Only works if your clinic has already set up your portal account with the same email address. Signing in with Google never creates one.'}
             </p>
           </div>
         </div>

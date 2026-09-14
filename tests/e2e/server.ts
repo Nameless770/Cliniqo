@@ -27,6 +27,13 @@ function required(name: string): string {
   return value;
 }
 
+/**
+ * The e2e clinic's id, fixed so the server can be told where sign-ups go before the seed that
+ * creates the clinic has run. The test database is recreated for every run, so it never
+ * collides with a leftover row.
+ */
+export const E2E_CLINIC_ID = '0e2e0000-0000-4000-8000-000000000001';
+
 export type RunningApp = {
   baseUrl: string;
   stop: () => Promise<void>;
@@ -86,6 +93,14 @@ export async function startApp(): Promise<RunningApp> {
      * being absent rather than by its checks running.
      */
     PORTAL_GOOGLE_SIGN_IN: 'true',
+    /*
+     * Self-registration ON, into the clinic the seed creates with this fixed id, for the
+     * same reason: off, the sign-up pages redirect before any of their checks run, and a
+     * test of "a forged token is refused" would pass by the feature being absent.
+     */
+    SIGNUP_CLINIC_ID: E2E_CLINIC_ID,
+    STAFF_SELF_SIGNUP: 'true',
+    PORTAL_SELF_SIGNUP: 'true',
     DATABASE_URL: withDatabase(required('DATABASE_URL'), TEST_DB),
     DATABASE_MIGRATION_URL: withDatabase(required('DATABASE_MIGRATION_URL'), TEST_DB),
     /* The journeys assert on triage behaviour, and they must assert on the engine that

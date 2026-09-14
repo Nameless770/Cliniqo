@@ -148,6 +148,13 @@
       "when": 1789219904912,
       "tag": "0020_patient_google_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789403451474,
+      "tag": "0021_self_registration",
+      "breakpoints": true
     }
   ]
 }

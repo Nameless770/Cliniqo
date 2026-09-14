@@ -151,6 +151,10 @@ export type GoogleIdentity = {
   email: string;
   emailVerified: boolean;
   name: string | null;
+  /* Separate from `name` so a patient's sign-up form can prefill first and last name
+     without guessing where one ends. Both come with the `profile` scope already asked for. */
+  givenName: string | null;
+  familyName: string | null;
   hostedDomain: string | null;
   nonce: string | null;
 };
@@ -222,6 +226,8 @@ export async function exchangeCode(
        address would let anyone who can create a Google account claim a staff email. */
     emailVerified: claims['email_verified'] === true,
     name: typeof claims['name'] === 'string' ? claims['name'] : null,
+    givenName: typeof claims['given_name'] === 'string' ? claims['given_name'] : null,
+    familyName: typeof claims['family_name'] === 'string' ? claims['family_name'] : null,
     hostedDomain: typeof claims['hd'] === 'string' ? claims['hd'] : null,
     nonce: typeof claims['nonce'] === 'string' ? claims['nonce'] : null,
   };

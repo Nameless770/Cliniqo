@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { hashPassword } from '@/server/auth/password';
 
 import { ownerPool } from '../helpers/db';
+import { E2E_CLINIC_ID } from './server';
 
 /**
  * The cast for the journeys.
@@ -35,9 +36,9 @@ export async function seedCast(): Promise<Cast> {
     await client.query('BEGIN');
 
     const clinic = await client.query<{ id: string }>(
-      `INSERT INTO clinic (name, timezone, mrn_prefix)
-       VALUES ($1, 'America/New_York', 'E2E') RETURNING id`,
-      [`E2E Practice ${tag}`],
+      `INSERT INTO clinic (id, name, timezone, mrn_prefix)
+       VALUES ($1, $2, 'America/New_York', 'E2E') RETURNING id`,
+      [E2E_CLINIC_ID, `E2E Practice ${tag}`],
     );
     const clinicId = clinic.rows[0]!.id;
 
@@ -64,7 +65,12 @@ export async function seedCast(): Promise<Cast> {
         `INSERT INTO patient (clinic_id, mrn, legal_first_name, legal_last_name,
                               date_of_birth, email)
          VALUES ($1, $2, $3, 'Tester', '1990-01-01', $4) RETURNING id, email`,
-        [clinicId, `E2E-${tag}-${mrnSuffix}`, first, `${first.toLowerCase()}-${tag}@e2e.local`],
+        [
+          clinicId,
+          `E2E-${tag}-${mrnSuffix}`,
+          first,
+          `${first.toLowerCase()}-${tag}@e2e.local`,
+        ],
       );
       await client.query(
         `INSERT INTO patient_account (clinic_id, patient_id, email, password_hash,

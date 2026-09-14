@@ -125,6 +125,21 @@ export const patient = pgTable(
       .notNull()
       .defaultNow(),
 
+    /**
+     * Set when the patient registered themselves online instead of at the front desk.
+     *
+     * A self-registered record is a NEW record, never matched to an existing one: nothing
+     * the sign-up form collects proves the person is who they say, and attaching a stranger
+     * to an existing chart on the strength of a name and date of birth is how portals leak
+     * records. Two records for one person is the safe failure; staff merge them after
+     * checking identity in person.
+     */
+    selfRegisteredAt: timestamp('self_registered_at', { withTimezone: true }),
+
+    /** When a member of staff confirmed a self-registered patient's identity, and who. */
+    identityVerifiedAt: timestamp('identity_verified_at', { withTimezone: true }),
+    identityVerifiedBy: uuid('identity_verified_by').references(() => userAccount.id),
+
     ...timestamps(),
     ...rowVersion(),
     ...softDelete(() => userAccount.id),

@@ -74,6 +74,10 @@ const IDENTIFYING_COLUMNS = {
   emergencyContactPhone: patient.emergencyContactPhone,
   emergencyContactRelationship: patient.emergencyContactRelationship,
   nppAcknowledgedAt: patient.nppAcknowledgedAt,
+  /* Whether the record came from online self-registration, and whether staff have since
+     checked the person's ID. Front-desk information, so identifying scope. */
+  selfRegisteredAt: patient.selfRegisteredAt,
+  identityVerifiedAt: patient.identityVerifiedAt,
   createdAt: patient.createdAt,
   updatedAt: patient.updatedAt,
   version: patient.version,
@@ -368,7 +372,12 @@ export async function findPotentialDuplicates(
  * concurrent registrations, so two receptionists registering at the same instant cannot
  * be handed the same MRN. Reading the counter and writing it back separately would.
  */
-async function allocateMrn(tx: Tx, clinicId: string): Promise<string> {
+/**
+ * Next MRN for a clinic. Exported for patient self-registration, which opens a record
+ * without a staff session and so cannot go through `createPatient`. Same counter, so a
+ * self-registered patient's MRN is indistinguishable in form from any other.
+ */
+export async function allocateMrn(tx: Tx, clinicId: string): Promise<string> {
   const [row] = await tx
     .update(clinic)
     .set({ mrnSequence: sql`${clinic.mrnSequence} + 1` })
@@ -511,6 +520,52 @@ export async function archivePatient(
         .returning({ id: patient.id });
 
       return { archived: result.length > 0 };
+    },
+  );
+}
+
+/**
+ * Record that staff checked a self-registered patient's identity in person.
+ *
+ * `patient.update`, the front desk's permission, because this is what the front desk does at
+ * a first visit: look at photo ID. Only a SELF-REGISTERED record can be marked, and only
+ * once. A record staff created was never in doubt, and letting the mark be re-applied would
+ * overwrite who checked and when, which is the part worth keeping.
+ *
+ * It does NOT merge the record with an older chart. That stays a separate, deliberate step.
+ * This only says the person on this record is who they claimed to be.
+ */
+export async function markIdentityVerified(
+  patientId: string,
+): Promise<{ verified: boolean }> {
+  return auditedWrite(
+    {
+      permission: 'patient.update',
+      action: 'patient.update',
+      entityType: 'patient',
+      entityId: patientId,
+      subjectPatientId: patientId,
+      metadata: { operation: 'identity_verified', fields: ['identityVerifiedAt'] },
+    },
+    async (tx, session) => {
+      const result = await tx
+        .update(patient)
+        .set({
+          identityVerifiedAt: new Date(),
+          identityVerifiedBy: session.userId,
+        })
+        .where(
+          and(
+            eq(patient.id, patientId),
+            eq(patient.clinicId, session.clinicId),
+            isNull(patient.archivedAt),
+            sql`${patient.selfRegisteredAt} is not null`,
+            isNull(patient.identityVerifiedAt),
+          ),
+        )
+        .returning({ id: patient.id });
+
+      return { verified: result.length > 0 };
     },
   );
 }

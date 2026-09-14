@@ -1,4 +1,8 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { signToken } from '@/lib/signed-token';
 
 import { appPool, closePools } from '../helpers/db';
 import { BrowserSession, text } from './client';
@@ -274,7 +278,8 @@ describe('Google sign-in', () => {
     expect(text(page.html)).toMatch(/sign in with google/i);
     /* A link would be followed by any prefetch. The form must POST. */
     expect(page.html).toMatch(/action="\/auth\/google\/start"[^>]*method="POST"/i);
-    expect(text(page.html)).toMatch(/never creates one/i);
+    /* Sign-up is on for this suite, so the page must say what a new account gets: nothing. */
+    expect(text(page.html)).toMatch(/no access until an administrator gives you a role/i);
   });
 
   it('starts the flow only on POST, and sends a correct authorization request', async () => {
@@ -356,7 +361,9 @@ describe('Patient Google sign-in', () => {
 
     // And that the alternative shares nothing, so the choice is a real one.
     expect(body).toMatch(/password sign-in above shares nothing/i);
-    expect(body).toMatch(/never creates one/i);
+    expect(body).toMatch(
+      /a new patient record that the clinic confirms at your first visit/i,
+    );
 
     /* A link would be followed by any prefetch. The form must POST. */
     expect(page.html).toMatch(
@@ -592,5 +599,188 @@ describe('the motion layer', () => {
     expect(body).toMatch(/\d{2}:\d{2}(:\d{2})? clinic time/);
     // The seeded appointment is still under way, so it is the patient's next one.
     expect(body).toMatch(/Next: /);
+  });
+});
+
+/* ------------------------------------------------------------- self-registration */
+
+describe('self-registration', () => {
+  /*
+   * The round trip through Google cannot run in a test. Everything after it can: the token
+   * below is minted with the server's own secret, exactly as the callback would, and from
+   * there the real pages, the real server actions and the real database do the rest.
+   */
+  const mint = (
+    aud: 'staff' | 'portal',
+    email: string,
+    extra: Record<string, unknown> = {},
+    secret = process.env['SESSION_SECRET'] ?? '',
+  ) =>
+    signToken(
+      {
+        aud,
+        sub: `e2e-sub-${randomUUID()}`,
+        email,
+        name: 'E2E Newcomer',
+        givenName: 'E2E',
+        familyName: 'Newcomer',
+        exp: Date.now() + 10 * 60_000,
+        ...extra,
+      },
+      secret,
+      'pending-signup',
+    );
+
+  it('never shows a sign-up page to someone who did not come from Google', async () => {
+    expect((await visitor().get('/signup')).url).toContain('/login');
+    expect((await visitor().get('/portal/signup')).url).toContain('/portal/login');
+  });
+
+  it('refuses a token signed with anything but the server secret', async () => {
+    const session = visitor();
+    session.plantCookie(
+      'cliniqo_portal_signup',
+      mint(
+        'portal',
+        `forged-${randomUUID()}@e2e.local`,
+        {},
+        'an-attacker-secret-of-reasonable-length',
+      ),
+    );
+    const page = await session.get('/portal/signup');
+    expect(page.url).toContain('/portal/login');
+  });
+
+  it('refuses a staff token on the patient sign-up page', async () => {
+    /* A token proving a Google identity for one audience is never accepted by the other. */
+    const session = visitor();
+    session.plantCookie(
+      'cliniqo_portal_signup',
+      mint('staff', `crossed-${randomUUID()}@e2e.local`),
+    );
+    expect((await session.get('/portal/signup')).url).toContain('/portal/login');
+  });
+
+  it('lets a new staff member request access, and gives them nothing', async () => {
+    const email = `requester-${randomUUID()}@e2e.local`;
+    const session = visitor();
+    session.plantCookie(
+      'cliniqo_signup',
+      mint('staff', email, { name: 'E2E Requester' }),
+    );
+
+    const page = await session.get('/signup');
+    expect(page.status).toBe(200);
+    expect(text(page.html)).toMatch(/starts with no access/i);
+    expect(text(page.html)).toContain(email);
+
+    const landed = await session.submit(page, 'name="fullName"', {
+      fullName: 'E2E Requester',
+    });
+    expect(landed.url).toContain('/dashboard');
+    expect(text(landed.html)).toMatch(/waiting for an administrator/i);
+
+    /*
+     * Signed in, and still refused everywhere that matters — by each page's own guard, not by
+     * the waiting screen. This is the property that makes staff self-registration safe.
+     */
+    for (const path of ['/patients', '/schedule', '/audit']) {
+      const refused = await session.get(path);
+      expect(refused.url, `${path} must refuse an account with no role`).not.toContain(
+        path,
+      );
+    }
+
+    const account = await appPool.query<{ roles: number; self_registered: boolean }>(
+      `SELECT (SELECT count(*)::int FROM user_role r
+                WHERE r.user_id = ua.id AND r.revoked_at IS NULL) AS roles,
+              ua.self_registered_at IS NOT NULL AS self_registered
+         FROM user_account ua WHERE ua.email = $1`,
+      [email],
+    );
+    expect(account.rows[0]!.roles).toBe(0);
+    expect(account.rows[0]!.self_registered).toBe(true);
+
+    /* And the administrator is told someone is waiting. */
+    const admin = visitor();
+    await signIn(admin, '/login', cast.adminEmail);
+    const staff = await admin.get('/staff');
+    expect(text(staff.html)).toMatch(/requested access/i);
+    expect(text(staff.html)).toMatch(/waiting for a role/i);
+  });
+
+  it('lets a new patient register, as a new record even with the same name and birthday', async () => {
+    /*
+     * The seeded patient is Ada Tester, born 1990-01-01, with an account of her own. A
+     * newcomer typing exactly that must get their own record and never hers.
+     */
+    const email = `newpatient-${randomUUID()}@e2e.local`;
+    const session = visitor();
+    const token = mint('portal', email, { givenName: 'Ada', familyName: 'Tester' });
+    session.plantCookie('cliniqo_portal_signup', token);
+
+    const page = await session.get('/portal/signup');
+    expect(page.status).toBe(200);
+    expect(text(page.html)).toMatch(/does not connect you to your existing records/i);
+
+    const landed = await session.submit(page, 'name="legalFirstName"', {
+      legalFirstName: 'Ada',
+      legalLastName: 'Tester',
+      dateOfBirth: '1990-01-01',
+      phonePrimary: '',
+    });
+    expect(landed.url).toContain('/portal');
+    expect(text(landed.html)).toMatch(/your account is ready/i);
+
+    const record = await appPool.query<{ patient_id: string }>(
+      `SELECT patient_id FROM patient_account WHERE email = $1`,
+      [email],
+    );
+    expect(record.rowCount).toBe(1);
+    expect(record.rows[0]!.patient_id).not.toBe(cast.patientId);
+
+    /*
+     * What "single use" really means for a stateless token. The browser's copy is cleared
+     * the moment it is spent. A copy taken beforehand is still validly signed until it
+     * expires — so what must hold is that replaying it cannot create a second account.
+     */
+    expect(
+      session.rawSetCookies.some(
+        (c) => /^cliniqo_portal_signup=;/.test(c) && /max-age=0/i.test(c),
+      ),
+      'the pending sign-up cookie is cleared once spent',
+    ).toBe(true);
+
+    const replay = visitor();
+    replay.plantCookie('cliniqo_portal_signup', token);
+    const again = await replay.get('/portal/signup');
+    const refused = await replay.submit(again, 'name="legalFirstName"', {
+      legalFirstName: 'Ada',
+      legalLastName: 'Tester',
+      dateOfBirth: '1990-01-01',
+      phonePrimary: '',
+    });
+    expect(refused.url).toContain('/portal/login');
+    const accounts = await appPool.query(
+      `SELECT 1 FROM patient_account WHERE email = $1`,
+      [email],
+    );
+    expect(accounts.rowCount).toBe(1);
+
+    /* Staff see the record flagged, and can clear the flag after checking ID. */
+    const desk = visitor();
+    await signIn(desk, '/login', cast.receptionEmail);
+    const chart = await desk.get(`/patients/${record.rows[0]!.patient_id}`);
+    expect(text(chart.html)).toMatch(/registered online, identity not yet checked/i);
+
+    const confirmed = await desk.submit(chart, 'I have checked their photo ID');
+    expect(text(confirmed.html)).toMatch(/registered online · identity checked/i);
+    expect(text(confirmed.html)).not.toMatch(/identity not yet checked/i);
+
+    const verified = await appPool.query<{ verified: boolean }>(
+      `SELECT identity_verified_at IS NOT NULL AS verified FROM patient WHERE id = $1`,
+      [record.rows[0]!.patient_id],
+    );
+    expect(verified.rows[0]!.verified).toBe(true);
   });
 });

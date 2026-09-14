@@ -109,6 +109,18 @@ export const userAccount = pgTable(
 
     createdBy: uuid('created_by').references((): AnyPgColumn => userAccount.id),
 
+    /**
+     * Set when the person created this account themselves, through "Continue with Google"
+     * on the sign-in page, rather than an administrator creating it.
+     *
+     * Such an account is created with NO roles, and roles are the only thing that grants
+     * access. So it can sign in and do nothing, which is the point: it is a request for
+     * access, and an administrator granting a role on the Staff screen is the approval.
+     * This column is how that screen tells a request apart from an account whose roles
+     * were deliberately removed.
+     */
+    selfRegisteredAt: timestamp('self_registered_at', { withTimezone: true }),
+
     ...timestamps(),
     ...rowVersion(),
     ...softDelete((): AnyPgColumn => userAccount.id),

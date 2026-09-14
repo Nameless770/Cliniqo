@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-import { formFields } from '@/lib/patient-schemas';
+import { formFields, patientSelfSignupInput } from '@/lib/patient-schemas';
 import {
   portalBookInput,
   portalCancelInput,
@@ -16,7 +16,13 @@ import {
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import { requestMeta, safeInet } from '@/server/auth/session';
 import { redeemPatientSetupToken, verifyPatientLogin } from '@/server/portal/accounts';
+import {
+  clearPendingSignup,
+  readPendingSignup,
+  signupClinicId,
+} from '@/server/auth/pending-signup';
 import { unlinkGoogle } from '@/server/portal/google';
+import { createSelfRegisteredPatient } from '@/server/portal/signup';
 import { sendTriageMessage } from '@/server/portal/triage';
 import {
   bookMyAppointment,
@@ -337,4 +343,56 @@ export async function portalUnlinkGoogleAction(): Promise<void> {
   );
 
   revalidatePath('/portal/account');
+}
+
+/**
+ * A new patient confirms their registration.
+ *
+ * Public, sessionless, and safe for the same reason as the staff version: nothing happens
+ * without a signed pending token for the PORTAL audience, which only the portal Google
+ * callback issues and only after Google verified the address. The address comes from that
+ * token. The form supplies name, date of birth and an optional phone — and `.strict()`
+ * refuses anything else, so an `email` or `patientId` field in a crafted request is a
+ * failure rather than something silently honoured.
+ *
+ * Never looks up an existing patient. See `createSelfRegisteredPatient`.
+ */
+export async function completePatientSignupAction(
+  _prev: PortalFormState,
+  formData: FormData,
+): Promise<PortalFormState> {
+  const clinicId = signupClinicId('portal');
+  if (!clinicId) redirect('/portal/login');
+
+  const pending = await readPendingSignup('portal');
+  if (!pending) redirect('/portal/login?error=sso');
+
+  const parsed = patientSelfSignupInput.safeParse(formFields(formData));
+  if (!parsed.success) return { errors: fieldErrors(parsed.error) };
+
+  const { ip: rawIp, userAgent } = await requestMeta();
+  const ip = safeInet(rawIp);
+
+  const verdict = await checkIpRateLimit(ip);
+  if (!verdict.allowed) {
+    return {
+      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
+    };
+  }
+
+  const result = await createSelfRegisteredPatient(
+    pending,
+    parsed.data,
+    clinicId,
+    ip,
+    userAgent,
+  );
+
+  await recordAttempt({ email: pending.email, ip, succeeded: result.ok });
+  await clearPendingSignup('portal');
+
+  if (!result.ok) redirect('/portal/login?error=sso');
+
+  await setPortalCookie(result.token, result.expiresAt);
+  redirect('/portal?welcome=1');
 }

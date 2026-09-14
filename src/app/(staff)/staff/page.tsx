@@ -42,6 +42,8 @@ export default async function StaffPage() {
           lastLoginAt: s.lastLoginAt ? s.lastLoginAt.toISOString() : null,
           passwordSet: s.passwordSet,
           hasLiveInvitation: s.hasLiveInvitation,
+          signsInWithGoogle: s.signsInWithGoogle,
+          awaitingRole: s.awaitingRole,
         }))}
       />
     </div>

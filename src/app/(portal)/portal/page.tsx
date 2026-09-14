@@ -26,14 +26,14 @@ function statusTone(
 export default async function PortalHomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ linked?: string }>;
+  searchParams: Promise<{ linked?: string; welcome?: string }>;
 }) {
   const session = await getPatientSession();
   if (!session) redirect('/portal/login');
 
   /* Set once, by the Google callback, on the sign-in that created the link. A
      boolean about the sign-in method - no PHI, and nothing a referrer could leak. */
-  const { linked } = await searchParams;
+  const { linked, welcome } = await searchParams;
 
   const [{ upcoming, past }, options] = await Promise.all([
     listMyAppointments(),
@@ -131,6 +131,29 @@ export default async function PortalHomePage({
         happened and points at where to undo it - a connection made silently, with no
         way back visible, is not something a patient has agreed to in any real sense.
       */}
+      {/*
+        Straight after a patient created their own account. It repeats the one thing they
+        most need to know about it, because they will not read the sign-up page twice: this
+        is a new record, and the clinic still has to check who they are.
+      */}
+      {welcome === '1' ? (
+        <p
+          role="status"
+          className="cq-rowin"
+          style={{
+            margin: 0,
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          Your account is ready, and you can book below. Bring photo ID to your first
+          visit so the clinic can confirm your details.
+        </p>
+      ) : null}
+
       {linked === '1' ? (
         <p
           role="status"

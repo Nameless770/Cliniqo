@@ -173,6 +173,47 @@ const schema = z
      * portal OAuth routes that do anything, and nothing to withdraw.
      */
     PORTAL_GOOGLE_SIGN_IN: booleanish.default(false),
+
+    /* --- Self-registration ------------------------------------------------ */
+    /**
+     * Which clinic a person joins when they sign themselves up.
+     *
+     * Required by both flags below. Multi-tenancy is undecided (CLAUDE.md), so this is the
+     * single-clinic answer, stated as configuration rather than guessed at runtime: a
+     * sign-up page has no session and nothing else that could say which practice the
+     * visitor means.
+     */
+    SIGNUP_CLINIC_ID: z.uuid().optional(),
+
+    /**
+     * Let a new staff member create their own account with "Continue with Google".
+     *
+     * OFF BY DEFAULT. The account is created with NO roles and therefore no access: it can
+     * sign in and see a waiting page, and nothing else, until an administrator assigns a
+     * role on the Staff screen. That is what keeps one-account-per-human and
+     * least-privilege (§164.312(a)(2)(i), §164.502(b)) an administrator's decision rather
+     * than the visitor's.
+     *
+     * Google only, never a password form. Google has already proven the person controls the
+     * address; a password sign-up cannot, and would let anyone register as any colleague.
+     */
+    STAFF_SELF_SIGNUP: booleanish.default(false),
+
+    /**
+     * Let a new patient create a portal account with "Continue with Google".
+     *
+     * OFF BY DEFAULT. Always creates a NEW patient record — it never looks for an existing
+     * one, because nothing a sign-up form can collect proves identity, and attaching a
+     * stranger to someone's chart on a name and date of birth is how portals leak records.
+     *
+     * Google only, for a reason specific to patients: a password sign-up form must say
+     * something when an address is already registered, and "already registered" at a
+     * medical practice means "is a patient here". Only an emailed confirmation link avoids
+     * that, and email needs a vendor with a Business Associate Agreement, which this
+     * project does not have yet. With Google, only the owner of the address ever sees the
+     * answer.
+     */
+    PORTAL_SELF_SIGNUP: booleanish.default(false),
   })
   /* --- Configuration coherence, every environment -------------------------- */
   .superRefine((env, ctx) => {
@@ -203,17 +244,37 @@ const schema = z
     }
 
     /*
-     * GOOGLE_ALLOWED_HD restricts sign-in to one Workspace domain. That is right for
-     * staff and incoherent for patients, who use personal addresses - so a deployment
-     * asking for both is asking for a patient button that refuses every patient.
+     * GOOGLE_ALLOWED_HD and PORTAL_GOOGLE_SIGN_IN MAY be combined, and in production usually
+     * should be: staff limited to the clinic's Workspace, patients on personal accounts.
+     * An earlier version refused the combination on the belief that the domain check applied
+     * to both flows. It never did — `portalGoogleConfig` always passes no hosted domain, and
+     * the portal callback never reads the `hd` claim — so the rule only blocked the correct
+     * production setup. The guarantee lives in that code, and a security invariant pins it.
      */
-    if (env.PORTAL_GOOGLE_SIGN_IN && env.GOOGLE_ALLOWED_HD) {
+
+    if (env.STAFF_SELF_SIGNUP && !env.GOOGLE_CLIENT_ID) {
       ctx.addIssue({
         code: 'custom',
-        path: ['PORTAL_GOOGLE_SIGN_IN'],
+        path: ['STAFF_SELF_SIGNUP'],
+        message: 'STAFF_SELF_SIGNUP=true requires Google sign-in (GOOGLE_CLIENT_ID).',
+      });
+    }
+
+    if (env.PORTAL_SELF_SIGNUP && !env.PORTAL_GOOGLE_SIGN_IN) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PORTAL_SELF_SIGNUP'],
+        message: 'PORTAL_SELF_SIGNUP=true requires PORTAL_GOOGLE_SIGN_IN=true.',
+      });
+    }
+
+    if ((env.STAFF_SELF_SIGNUP || env.PORTAL_SELF_SIGNUP) && !env.SIGNUP_CLINIC_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SIGNUP_CLINIC_ID'],
         message:
-          'PORTAL_GOOGLE_SIGN_IN cannot be combined with GOOGLE_ALLOWED_HD: patients sign ' +
-          'in with personal Google accounts, which by definition have no hosted domain.',
+          'Self-registration is on but SIGNUP_CLINIC_ID is not set: nothing says which ' +
+          'clinic a new account should join.',
       });
     }
 
@@ -272,6 +333,21 @@ const schema = z
         code: 'custom',
         path: ['APP_URL'],
         message: 'APP_URL is required when Google sign-in is configured.',
+      });
+    }
+
+    /*
+     * In production, staff self-registration must be narrowed to the clinic's own Google
+     * Workspace. Without it anyone on the internet with a Gmail address can file a request
+     * that lands in front of an administrator, looking like a colleague, one click from a
+     * role. The account grants nothing on its own; the request is still a social-engineering
+     * opportunity that the domain check removes.
+     */
+    if (env.STAFF_SELF_SIGNUP && !env.GOOGLE_ALLOWED_HD) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['GOOGLE_ALLOWED_HD'],
+        message: 'STAFF_SELF_SIGNUP in production requires GOOGLE_ALLOWED_HD.',
       });
     }
 

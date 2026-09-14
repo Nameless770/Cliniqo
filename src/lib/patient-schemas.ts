@@ -172,6 +172,27 @@ export type CreatePatientInput = z.infer<typeof createPatientInput>;
 /* Search and archive                                                         */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * What a patient supplies when registering themselves online.
+ *
+ * The minimum a front desk needs to open a record and a clinician needs to see the right
+ * person: legal name and date of birth, plus an optional phone number. Everything else is
+ * collected in person, where identity can actually be checked.
+ *
+ * No email field: the address is the one Google verified, taken from the signed sign-up
+ * token and never from the form, so a visitor cannot register an address they do not own.
+ */
+export const patientSelfSignupInput = z
+  .object({
+    legalFirstName: requiredText('First name', 100),
+    legalLastName: requiredText('Last name', 100),
+    dateOfBirth,
+    phonePrimary: phone,
+  })
+  .strict();
+
+export type PatientSelfSignupInput = z.infer<typeof patientSelfSignupInput>;
+
 export const patientSearchInput = z.object({
   /** Empty means "list everyone", which is a legitimate roster view. */
   query: z.string().trim().max(120).optional().default(''),

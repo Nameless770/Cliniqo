@@ -7,6 +7,11 @@ import {
   type GoogleIdentity,
   type OAuthHandshake,
 } from '@/server/auth/google';
+import {
+  mintPendingSignup,
+  pendingSignupCookie,
+  signupClinicId,
+} from '@/server/auth/pending-signup';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import { requestMeta, safeInet } from '@/server/auth/session';
 import {
@@ -31,8 +36,13 @@ import { portalCookieName, portalCookieOptions } from '@/server/portal/session';
  * does. The two flows share arithmetic and nothing else.
  *
  * ==========================================================================
- * IT LINKS. IT NEVER CREATES.
+ * IT LINKS. IT NEVER CREATES — EVEN WITH SELF-REGISTRATION ON.
  * ==========================================================================
+ *
+ * With PORTAL_SELF_SIGNUP off (the default) a Google account with no portal account is
+ * refused. With it on, it is handed to /portal/signup with a signed token, and a NEW patient
+ * record is created there only after the patient confirms. This route itself never inserts
+ * a `patient` or a `patient_account`.
  *
  * A successful Google sign-in proves who is at the keyboard. It does not make anyone a
  * patient of this clinic — staff do that, and staff issue the portal account. So this
@@ -148,6 +158,25 @@ export async function GET(request: NextRequest): Promise<Response> {
      * password login already uses.
      */
     await recordAttempt({ email: identity.email, ip, succeeded: result.ok });
+
+    /*
+     * No portal account for this Google identity. With patient self-registration on, offer
+     * to create one — a NEW record, never a match to an existing chart; see
+     * `createSelfRegisteredPatient`. The patient already read the Google notice before the
+     * redirect that brought them here. Nothing is created until they confirm on the next
+     * page, and only the owner of this Google account ever sees it, so it answers nothing
+     * about who is or is not a patient here.
+     */
+    if (!result.ok && result.reason === 'no_account' && signupClinicId('portal')) {
+      const toSignup = response('/portal/signup');
+      const pending = pendingSignupCookie('portal');
+      toSignup.cookies.set(
+        pending.name,
+        mintPendingSignup('portal', identity, Date.now()),
+        pending.options,
+      );
+      return toSignup;
+    }
 
     if (!result.ok) return response(FAILURE);
 

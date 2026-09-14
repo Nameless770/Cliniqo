@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { clientEnv } from '@/env/client';
 import { googleConfig } from '@/server/auth/google';
+import { signupClinicId } from '@/server/auth/pending-signup';
 import { getSession } from '@/server/auth/session';
 
 import { LoginForm } from './LoginForm';
@@ -28,6 +29,8 @@ export default async function LoginPage({
 
   /* Null when Google sign-in is not configured, in which case nothing about it renders. */
   const google = googleConfig();
+  /* Only ever true alongside Google: the env validator refuses sign-up without it. */
+  const signupOpen = Boolean(google && signupClinicId('staff'));
   const { error } = await searchParams;
 
   return (
@@ -172,8 +175,9 @@ export default async function LoginPage({
               color: 'var(--text-muted)',
             }}
           >
-            Only works for an account your clinic has already issued. Signing in with
-            Google never creates one.
+            {signupOpen
+              ? 'New here? Use Google to request a staff account. It has no access until an administrator gives you a role.'
+              : 'Only works for an account your clinic has already issued. Signing in with Google never creates one.'}
           </p>
         </>
       ) : null}
@@ -185,8 +189,9 @@ export default async function LoginPage({
           color: 'var(--text-muted)',
         }}
       >
-        Accounts are issued by a clinic administrator. If you cannot sign in, contact them
-        directly — there is no self-service password reset.
+        {signupOpen
+          ? 'Access is granted by a clinic administrator. There is no self-service password reset — contact them directly if you cannot sign in.'
+          : 'Accounts are issued by a clinic administrator. If you cannot sign in, contact them directly — there is no self-service password reset.'}
       </p>
 
       {/*

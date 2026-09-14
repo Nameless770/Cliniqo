@@ -15,6 +15,11 @@ import {
   type OAuthHandshake,
 } from '@/server/auth/google';
 import {
+  mintPendingSignup,
+  pendingSignupCookie,
+  signupClinicId,
+} from '@/server/auth/pending-signup';
+import {
   createSession,
   requestMeta,
   safeInet,
@@ -26,8 +31,13 @@ import {
  * Leg two: Google sends the browser back.
  *
  * ==========================================================================
- * THIS LINKS. IT NEVER CREATES.
+ * THIS LINKS. IT NEVER CREATES — EVEN WITH SELF-REGISTRATION ON.
  * ==========================================================================
+ *
+ * With STAFF_SELF_SIGNUP off (the default) a Google account with no staff account is
+ * refused. With it on, it is handed to /signup with a signed token, and the account is
+ * created there only after the person confirms, with no roles. This route itself never
+ * inserts a `user_account`.
  *
  * A successful Google sign-in proves who is at the keyboard. It does not decide who may
  * have an account — an administrator does, deliberately, one per identified human
@@ -190,8 +200,31 @@ export async function GET(request: NextRequest): Promise<Response> {
       succeeded: Boolean(account) && account!.status === 'active',
     });
 
-    /* No account: the refusal that makes this a link rather than a sign-up. */
-    if (!account) return response(FAILURE);
+    /*
+     * No account.
+     *
+     * With self-registration off — the default — this is the refusal that makes Google a way
+     * to reach an EXISTING account, never a way to get one.
+     *
+     * With it on, the person is sent to a page that says what happens next and asks them to
+     * confirm, carrying their verified identity in a short-lived signed token. Nothing is
+     * created here: a colleague who picked the wrong account in Google's chooser should be
+     * able to back out. Only the owner of this Google account ever reaches that page, so it
+     * reveals nothing about who does or does not work here. And if GOOGLE_ALLOWED_HD is set,
+     * the domain check above has already run — a sign-up is never offered outside it.
+     */
+    if (!account) {
+      if (!signupClinicId('staff')) return response(FAILURE);
+
+      const toSignup = response('/signup');
+      const pending = pendingSignupCookie('staff');
+      toSignup.cookies.set(
+        pending.name,
+        mintPendingSignup('staff', identity, Date.now()),
+        pending.options,
+      );
+      return toSignup;
+    }
 
     const now = new Date();
     const locked = account.lockedUntil !== null && account.lockedUntil > now;

@@ -1193,8 +1193,8 @@ void randomUUID;
   check(
     'Google sign-in',
     'a hosted-domain restriction cannot be applied to patients',
-    /PORTAL_GOOGLE_SIGN_IN && env\.GOOGLE_ALLOWED_HD/.test(envFile) &&
-      /allowedHostedDomain: undefined/.test(portalModule),
+    /allowedHostedDomain: undefined/.test(stripComments(portalModule)) &&
+      !/hostedDomain/.test(stripComments(portalCallback)),
   );
 
   /*
@@ -1205,7 +1205,7 @@ void randomUUID;
    */
   check(
     'Google sign-in',
-    'neither flow can create an account',
+    'neither Google callback creates an account itself',
     !/insert\(userAccount\)/.test(staffCallback) &&
       !/insert\(patientAccount\)/.test(portalModule + portalCallback),
   );
@@ -1237,8 +1237,10 @@ void randomUUID;
    * disclosure. Everything else in the feature — the recorded authorization, the audit
    * row, the disconnect control — is downstream of the patient having been told first.
    */
+  /* The FORM that starts the flow, not the button's label: other copy on the page may
+     mention Google, and a label match would let the notice slide below the real button. */
   const noticeAt = portalLogin.indexOf('tells Google that');
-  const buttonAt = portalLogin.indexOf('Continue with Google');
+  const buttonAt = portalLogin.indexOf('action="/portal/auth/google/start"');
   check(
     'Google sign-in',
     'the portal states what Google learns before the button that tells it',
@@ -1308,6 +1310,127 @@ void randomUUID;
     'Log exhaust',
     `no log line prints an error message${offenders.length ? ` (found in: ${[...new Set(offenders)].join(', ')})` : ''}`,
     offenders.length === 0,
+  );
+}
+
+/* ---------------------------------------------------------- self-registration */
+
+/*
+ * People creating their own accounts. Every guarantee below is one a well-meant refactor
+ * could quietly remove while every page still works.
+ */
+{
+  const envFile = read('src/env/server.ts');
+  const token = stripComments(read('src/lib/signed-token.ts'));
+  const pending = stripComments(read('src/server/auth/pending-signup.ts'));
+  const staffSignup = stripComments(read('src/server/auth/staff-signup.ts'));
+  const patientSignup = stripComments(read('src/server/portal/signup.ts'));
+  const signupActions = stripComments(read('src/server/actions/signup.ts'));
+  const portalActions = stripComments(read('src/server/actions/portal.ts'));
+  const patientSchemas = read('src/lib/patient-schemas.ts');
+  const staffSchemas = read('src/lib/signup-schemas.ts');
+  const staffData = stripComments(read('src/server/data-access/staff.ts'));
+
+  check(
+    'Self-registration',
+    'both sign-up switches are off by default',
+    /STAFF_SELF_SIGNUP: booleanish\.default\(false\)/.test(envFile) &&
+      /PORTAL_SELF_SIGNUP: booleanish\.default\(false\)/.test(envFile),
+  );
+
+  /*
+   * The whole reason staff self-registration is acceptable. A sign-up that could grant a
+   * role would let anyone with a Google account choose their own access to patient records.
+   */
+  check(
+    'Self-registration',
+    'a self-registered staff account is created with no roles',
+    /insert\(userAccount\)/.test(staffSignup) &&
+      !/userRole|roleId|user_role/.test(staffSignup) &&
+      !/roles/.test(staffSchemas.replace(/\/\*[\s\S]*?\*\//g, '')),
+  );
+
+  /*
+   * Attaching a visitor to an existing chart because their name and birthday match is how
+   * portals leak records. The sign-up may create a patient; it may never read one.
+   */
+  check(
+    'Self-registration',
+    'patient self-registration never looks up an existing patient',
+    /insert\(patient\)/.test(patientSignup) && !/\.from\(patient\)/.test(patientSignup),
+  );
+
+  /*
+   * The email and Google subject must come from the signed token, never from the form, or a
+   * visitor could register an address they do not own. Both input schemas are strict and
+   * carry no email field, and both actions read the token before creating anything.
+   */
+  const patientInput =
+    /patientSelfSignupInput = z[\s\S]*?\.strict\(\)/.exec(patientSchemas)?.[0] ?? '';
+  const staffInput =
+    /staffSelfSignupInput = z[\s\S]*?\.strict\(\)/.exec(staffSchemas)?.[0] ?? '';
+  const readsBeforeCreate = (source, create) => {
+    const readAt = source.indexOf('readPendingSignup(');
+    const createAt = source.indexOf(create);
+    return readAt !== -1 && createAt !== -1 && readAt < createAt;
+  };
+  check(
+    'Self-registration',
+    'the sign-up identity comes from the signed token, never the form',
+    patientInput.length > 0 &&
+      staffInput.length > 0 &&
+      !/email/.test(patientInput) &&
+      !/email/.test(staffInput) &&
+      readsBeforeCreate(signupActions, 'createSelfRegisteredStaff(') &&
+      readsBeforeCreate(portalActions, 'createSelfRegisteredPatient('),
+  );
+
+  check(
+    'Self-registration',
+    'the pending sign-up token is HMAC-signed, compared in constant time, and expires',
+    /createHmac\('sha256'/.test(token) &&
+      /timingSafeEqual/.test(token) &&
+      /exp <= nowMs/.test(token),
+  );
+
+  /* The same separation the two Google callbacks keep, one step later. */
+  check(
+    'Self-registration',
+    'staff and patient sign-up tokens use different cookies and are checked for audience',
+    /staff: 'cliniqo_signup'/.test(pending) &&
+      /portal: 'cliniqo_portal_signup'/.test(pending) &&
+      /payload\['aud'\] !== audience/.test(pending),
+  );
+
+  /* A spent token that survived a failed attempt could be replayed. */
+  check(
+    'Self-registration',
+    'a pending sign-up token is cleared whether or not the sign-up succeeded',
+    signupActions.indexOf("clearPendingSignup('staff')") <
+      signupActions.indexOf('if (!result.ok)') &&
+      portalActions.indexOf("clearPendingSignup('portal')") <
+        portalActions.indexOf('if (!result.ok) redirect'),
+  );
+
+  /*
+   * In production, staff sign-up must be limited to the clinic's Workspace, or anyone on the
+   * internet can file a request that looks like a colleague's, one click from a role.
+   */
+  const production = envFile.slice(envFile.indexOf("env.APP_ENV !== 'production'"));
+  check(
+    'Self-registration',
+    'staff self-registration requires a Workspace domain in production',
+    /env\.STAFF_SELF_SIGNUP && !env\.GOOGLE_ALLOWED_HD/.test(production),
+  );
+
+  /* The staff layout calls this for every role; it must gate itself, as the break-glass badge does. */
+  const badge =
+    /export async function staffAccessRequestBadge[\s\S]*?\n}/.exec(staffData)?.[0] ?? '';
+  check(
+    'Self-registration',
+    'the access-request badge checks staff.read before counting',
+    badge.indexOf("can(permissions, 'staff.read')") !== -1 &&
+      badge.indexOf("can(permissions, 'staff.read')") < badge.indexOf('getDb()'),
   );
 }
 

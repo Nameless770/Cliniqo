@@ -53,6 +53,9 @@ import { createPatientSession } from './session';
  * IT LINKS. IT NEVER CREATES.
  * ==========================================================================
  *
+ * Still true with PORTAL_SELF_SIGNUP on: registration lives in `./signup.ts`, behind a
+ * confirmation page, and never in this file.
+ *
  * The same rule as staff, for an additional reason. There it keeps a system holding
  * patient records from issuing itself logins. Here it also means the flow reveals nothing
  * about people who are not already patients: a Google account the clinic has never heard
@@ -92,8 +95,15 @@ export function portalGoogleConfig(): GoogleConfig | null {
   };
 }
 
+/**
+ * `no_account` is split out from every other refusal for exactly one caller decision:
+ * whether to offer self-registration. It never reaches the browser as a different message —
+ * only the owner of the Google account sees what follows, and with sign-up off the two
+ * reasons still produce the one generic refusal.
+ */
 export type PortalGoogleResult =
-  { ok: true; token: string; expiresAt: Date; linked: boolean } | { ok: false };
+  | { ok: true; token: string; expiresAt: Date; linked: boolean }
+  | { ok: false; reason: 'no_account' | 'refused' };
 
 /**
  * Resolve a verified Google identity to a portal session.
@@ -168,11 +178,11 @@ export async function signInPatientWithGoogle(
    * No account: the refusal that makes this a link rather than a sign-up, and the one
    * that stops the page answering "is this person a patient here?".
    */
-  if (!account) return { ok: false };
+  if (!account) return { ok: false, reason: 'no_account' };
 
   const now = new Date();
   const locked = account.lockedUntil !== null && account.lockedUntil > now;
-  if (locked || account.status !== 'active') return { ok: false };
+  if (locked || account.status !== 'active') return { ok: false, reason: 'refused' };
 
   return db.transaction(async (tx) => {
     if (link) {

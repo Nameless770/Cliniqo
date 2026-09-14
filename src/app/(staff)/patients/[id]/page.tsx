@@ -17,6 +17,7 @@ import { getPatientPrescriptions } from '@/server/data-access/prescriptions';
 import { BreakGlassButton } from './BreakGlassButton';
 import { ClinicalFacts } from './ClinicalFacts';
 import { ArchiveControls } from './ArchiveControls';
+import { IdentityCheck } from './IdentityCheck';
 import { InvitePatientButton } from './InvitePatientButton';
 import { PrescriptionActions } from './PrescriptionActions';
 import { StartNoteButton } from './StartNoteButton';
@@ -252,6 +253,52 @@ export default async function PatientProfilePage({
       </div>
 
       {mayBreakGlass ? <BreakGlassButton patientId={id} /> : null}
+
+      {/*
+        A patient who registered themselves online has told us who they are; nobody has
+        checked. Shown to everyone who can open the chart, so no one treats the record as
+        confirmed by default, and above the clinical sections so it is read first.
+      */}
+      {p.selfRegisteredAt && !p.identityVerifiedAt && !p.archivedAt ? (
+        <div
+          role="status"
+          style={{
+            display: 'grid',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--status-warn-bg)',
+            color: 'var(--status-warn-text)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          <span>
+            <strong>Registered online, identity not yet checked.</strong> Check photo ID
+            at their first visit. If they already have a record here, merge the two only
+            after checking.
+          </span>
+          {mayEdit ? <IdentityCheck patientId={id} /> : null}
+        </div>
+      ) : null}
+
+      {/*
+        After the check, a quiet permanent line instead of the banner. It is also the
+        confirmation for whoever just pressed the button: the banner they pressed it in is
+        gone after the page refreshes, so a message inside it would never be seen.
+      */}
+      {p.selfRegisteredAt && p.identityVerifiedAt ? (
+        <p
+          role="status"
+          style={{
+            margin: 0,
+            fontSize: 'var(--text-sm)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          Registered online · identity checked{' '}
+          {formatDateInZone(p.identityVerifiedAt, timeZone)}.
+        </p>
+      ) : null}
 
       {p.archivedAt ? (
         <p

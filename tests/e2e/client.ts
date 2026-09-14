@@ -61,7 +61,8 @@ export function parseForms(html: string, pageUrl: string): ParsedForm[] {
       if (!name) continue;
       const type = (attr(tag, 'type') ?? 'text').toLowerCase();
       // Unchecked boxes and radios are not submitted, exactly as a browser would do.
-      if ((type === 'checkbox' || type === 'radio') && !/\schecked\b/i.test(tag)) continue;
+      if ((type === 'checkbox' || type === 'radio') && !/\schecked\b/i.test(tag))
+        continue;
       fields.push([name, attr(tag, 'value') ?? '']);
     }
 
@@ -73,7 +74,9 @@ export function parseForms(html: string, pageUrl: string): ParsedForm[] {
     for (const select of body.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)) {
       const name = attr(`<select${select[1]}>`, 'name');
       if (!name) continue;
-      const options = [...(select[2] ?? '').matchAll(/<option\b[^>]*>/gi)].map((o) => o[0]);
+      const options = [...(select[2] ?? '').matchAll(/<option\b[^>]*>/gi)].map(
+        (o) => o[0],
+      );
       const selected = options.find((o) => /\sselected\b/i.test(o)) ?? options[0];
       fields.push([name, selected ? (attr(selected, 'value') ?? '') : '']);
     }
@@ -108,6 +111,17 @@ export class BrowserSession {
 
   constructor(private readonly baseUrl: string) {}
 
+  /**
+   * Put a cookie in the jar as though the server had set it.
+   *
+   * For exactly one kind of test: handing the browser a token the application itself would
+   * have issued on a step the suite cannot perform — the round trip through Google. The
+   * token is still minted with the server's real secret and still verified by the server.
+   */
+  plantCookie(name: string, value: string): void {
+    this.cookies.set(name, value);
+  }
+
   /** For assertions about cookie flags — HttpOnly, SameSite, the __Host- prefix. */
   readonly rawSetCookies: string[] = [];
 
@@ -124,7 +138,11 @@ export class BrowserSession {
       const name = pair!.slice(0, eq).trim();
       const value = pair!.slice(eq + 1).trim();
       // An expiry in the past is a deletion, which is how sign-out must be observable.
-      if (value === '' || /expires=Thu, 01 Jan 1970/i.test(raw) || /max-age=0/i.test(raw)) {
+      if (
+        value === '' ||
+        /expires=Thu, 01 Jan 1970/i.test(raw) ||
+        /max-age=0/i.test(raw)
+      ) {
         this.cookies.delete(name);
       } else {
         this.cookies.set(name, value);

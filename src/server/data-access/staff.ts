@@ -5,7 +5,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
-import { role, staffSetupToken, userAccount, userRole } from '@/db/schema';
+import { role, staffSetupToken, userAccount, userIdentity, userRole } from '@/db/schema';
+import { can } from '@/lib/permissions';
 import type { RoleCode } from '@/lib/roles';
 import { hashPassword, UNUSABLE_PASSWORD } from '@/server/auth/password';
 import { revokeAllSessionsForUser } from '@/server/auth/session';
@@ -64,6 +65,13 @@ export type StaffRow = {
   lastLoginAt: Date | null;
   passwordSet: boolean;
   hasLiveInvitation: boolean;
+  /** Has a Google identity linked, so a missing password is expected rather than a problem. */
+  signsInWithGoogle: boolean;
+  /**
+   * Requested access through self-registration and holds no role yet. The administrator's
+   * cue to decide: the account can sign in, and can reach nothing until they do.
+   */
+  awaitingRole: boolean;
   archivedAt: Date | null;
 };
 
@@ -96,11 +104,20 @@ export async function listStaff(): Promise<StaffRow[]> {
           status: userAccount.status,
           lastLoginAt: userAccount.lastLoginAt,
           passwordHash: userAccount.passwordHash,
+          selfRegisteredAt: userAccount.selfRegisteredAt,
           archivedAt: userAccount.archivedAt,
         })
         .from(userAccount)
         .where(eq(userAccount.clinicId, session.clinicId))
         .orderBy(asc(userAccount.fullName));
+
+      /* Which accounts sign in with Google. Existence only; the subject never leaves here. */
+      const google = await tx
+        .select({ userId: userIdentity.userId })
+        .from(userIdentity)
+        .innerJoin(userAccount, eq(userAccount.id, userIdentity.userId))
+        .where(eq(userAccount.clinicId, session.clinicId));
+      const googleSet = new Set(google.map((g) => g.userId));
 
       const grants = await tx
         .select({ userId: userRole.userId, code: role.code })
@@ -122,18 +139,30 @@ export async function listStaff(): Promise<StaffRow[]> {
 
       const liveSet = new Set(live.map((l) => l.userId));
 
-      return rows.map((r) => ({
-        id: r.id,
-        email: r.email,
-        fullName: r.fullName,
-        status: r.status as StaffRow['status'],
-        roles: grants.filter((g) => g.userId === r.id).map((g) => g.code),
-        lastLoginAt: r.lastLoginAt,
-        // The hash itself NEVER leaves this function — only whether one is set.
-        passwordSet: r.passwordHash !== UNUSABLE_PASSWORD,
-        hasLiveInvitation: liveSet.has(r.id),
-        archivedAt: r.archivedAt,
-      }));
+      const mapped = rows.map((r) => {
+        const roles = grants.filter((g) => g.userId === r.id).map((g) => g.code);
+        return {
+          id: r.id,
+          email: r.email,
+          fullName: r.fullName,
+          status: r.status as StaffRow['status'],
+          roles,
+          lastLoginAt: r.lastLoginAt,
+          // The hash itself NEVER leaves this function — only whether one is set.
+          passwordSet: r.passwordHash !== UNUSABLE_PASSWORD,
+          hasLiveInvitation: liveSet.has(r.id),
+          signsInWithGoogle: googleSet.has(r.id),
+          awaitingRole:
+            r.selfRegisteredAt !== null &&
+            roles.length === 0 &&
+            r.status === 'active' &&
+            r.archivedAt === null,
+          archivedAt: r.archivedAt,
+        };
+      });
+
+      /* Requests first: they are the only rows on this screen waiting on a decision. */
+      return mapped.sort((a, b) => Number(b.awaitingRole) - Number(a.awaitingRole));
     },
   );
 }
@@ -600,4 +629,37 @@ export async function changeOwnPassword(
   await revokeAllSessionsForUser(active.userId, 'admin_revoke');
 
   return { ok: true };
+}
+
+/**
+ * How many staff have requested access and are waiting for a role: the Staff nav badge.
+ *
+ * Gated inside the function, like the break-glass badge, because the staff layout that calls
+ * it runs for every role. Who is asking to join the clinic's staff is the Staff screen's
+ * business, so it takes the Staff screen's permission. Null, not zero, for anyone without it.
+ */
+export async function staffAccessRequestBadge(
+  permissions: ReadonlySet<string> | readonly string[],
+  clinicId: string,
+): Promise<number | null> {
+  if (!can(permissions, 'staff.read')) return null;
+
+  const [row] = await getDb()
+    .select({ value: sql<number>`count(*)::int` })
+    .from(userAccount)
+    .where(
+      and(
+        eq(userAccount.clinicId, clinicId),
+        eq(userAccount.status, 'active'),
+        isNull(userAccount.archivedAt),
+        sql`${userAccount.selfRegisteredAt} is not null`,
+        sql`not exists (
+          select 1 from ${userRole}
+           where ${userRole.userId} = ${userAccount.id}
+             and ${userRole.revokedAt} is null
+        )`,
+      ),
+    );
+
+  return row?.value ?? 0;
 }

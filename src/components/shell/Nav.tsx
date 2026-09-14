@@ -19,6 +19,12 @@ import styles from './AppShell.module.css';
  * server action is still a public endpoint. Authorization is re-checked server-side on
  * every data operation — CLAUDE.md rule 2.
  */
+/** What each count means, for the words a screen reader says after the link name. */
+const BADGE_MEANING: Record<string, string> = {
+  '/break-glass': 'awaiting review',
+  '/staff': 'waiting for a role',
+};
+
 export function Nav({
   permissions,
   badges = {},
@@ -58,7 +64,9 @@ export function Nav({
                     <span className={`${styles.navBadge} cq-pulse`} aria-hidden="true">
                       {badges[item.href]}
                     </span>
-                    <span className="sr-only">, {badges[item.href]} awaiting review</span>
+                    <span className="sr-only">
+                      , {badges[item.href]} {BADGE_MEANING[item.href] ?? 'waiting'}
+                    </span>
                   </>
                 ) : null}
               </Link>

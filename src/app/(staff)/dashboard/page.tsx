@@ -102,6 +102,47 @@ export default async function DashboardPage() {
 
   const isAdmin = can(session.permissions, 'clinic.configure');
 
+  /*
+   * No roles at all: a staff member who requested access and has not been given any yet.
+   *
+   * Stated outright, and with no links. The ordinary landing page below offers the schedule
+   * and the patient list, and for this account both would end on a refusal — being walked
+   * into two "forbidden" pages is a worse way to learn you are waiting than being told.
+   * Every page is still guarded on its own; this changes what the screen says, not what
+   * the account can reach.
+   */
+  if (session.roles.length === 0) {
+    return (
+      <div style={{ display: 'grid', gap: 'var(--space-3)', maxWidth: '36rem' }}>
+        <h1 style={{ fontSize: 'var(--text-xl)' }}>Welcome, {session.fullName}</h1>
+        <p
+          role="status"
+          style={{
+            margin: 0,
+            padding: 'var(--space-4)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            background: 'var(--bg-surface)',
+          }}
+        >
+          Your account is waiting for an administrator at {session.clinicName} to give you
+          a role. Until then you cannot see patients, the schedule, or anything else. Ask
+          them to open <strong>Staff</strong> and choose your role.
+        </p>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 'var(--text-sm)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          Signed in as {session.email}. You will not need to sign up again — once you have
+          a role, sign in with Google as you did today.
+        </p>
+      </div>
+    );
+  }
+
   if (!isAdmin) {
     return (
       <div style={{ display: 'grid', gap: 'var(--space-3)' }}>

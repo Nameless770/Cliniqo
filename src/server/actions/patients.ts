@@ -21,9 +21,10 @@ import {
   archivePatient,
   createPatient,
   findPotentialDuplicates,
+  markIdentityVerified,
+  type PatientListRow,
   unarchivePatient,
   updatePatient,
-  type PatientListRow,
 } from '@/server/data-access/patients';
 
 /**
@@ -242,6 +243,36 @@ export async function unarchivePatientAction(
   }
 }
 
+/**
+ * Staff confirm a self-registered patient is who they say.
+ *
+ * The permission check is inside `markIdentityVerified`, first thing, like every data
+ * operation. The only input is the record id, validated as a uuid before it reaches SQL.
+ */
+export async function markIdentityVerifiedAction(
+  _previous: PatientFormState,
+  formData: FormData,
+): Promise<PatientFormState> {
+  const parsed = unarchivePatientInput.safeParse(formFields(formData));
+  if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
+
+  const { patientId } = parsed.data;
+
+  try {
+    const { verified } = await markIdentityVerified(patientId);
+    if (!verified) {
+      return { message: 'That record is not waiting for an identity check.' };
+    }
+
+    revalidatePath(`/patients/${patientId}`);
+    return { ok: true, message: 'Identity confirmed.' };
+  } catch (error) {
+    const authz = authzMessage(error);
+    if (authz) return authz;
+    throw error;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Patient portal invitation                                                  */
 /* -------------------------------------------------------------------------- */
@@ -265,9 +296,7 @@ export async function invitePatientAction(
   _previous: InviteFormState,
   formData: FormData,
 ): Promise<InviteFormState> {
-  const parsed = z
-    .object({ patientId: z.uuid() })
-    .safeParse(formFields(formData));
+  const parsed = z.object({ patientId: z.uuid() }).safeParse(formFields(formData));
   if (!parsed.success) return { message: 'Bad request.' };
 
   const { invitePatient } = await import('@/server/portal/accounts');

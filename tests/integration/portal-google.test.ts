@@ -37,6 +37,8 @@ const identityFor = (email: string, subject: string): GoogleIdentity => ({
   email,
   emailVerified: true,
   name: 'Portal Test',
+  givenName: 'Portal',
+  familyName: 'Test',
   hostedDomain: null,
   nonce: null,
 });

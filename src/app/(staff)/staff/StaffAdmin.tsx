@@ -29,6 +29,8 @@ export type StaffView = {
   lastLoginAt: string | null;
   passwordSet: boolean;
   hasLiveInvitation: boolean;
+  signsInWithGoogle: boolean;
+  awaitingRole: boolean;
 };
 
 function Banner({ state }: { state: StaffFormState }) {
@@ -263,7 +265,20 @@ export function StaffAdmin({ staff }: { staff: StaffView[] }) {
               <Badge tone={s.status === 'active' ? 'success' : 'neutral'}>
                 {s.status}
               </Badge>
-              {!s.passwordSet ? (
+              {s.awaitingRole ? (
+                /*
+                 * The decision this screen exists for. The account can sign in and reach
+                 * nothing; ticking a role below and saving is the approval, audited as
+                 * role.assign. Deactivating is the refusal.
+                 */
+                <Badge tone="warning">
+                  Requested access: choose a role or deactivate
+                </Badge>
+              ) : null}
+              {s.signsInWithGoogle ? (
+                <Badge tone="info">Signs in with Google</Badge>
+              ) : null}
+              {!s.passwordSet && !s.signsInWithGoogle ? (
                 <Badge tone={s.hasLiveInvitation ? 'info' : 'warning'}>
                   {s.hasLiveInvitation
                     ? 'Invitation pending'
