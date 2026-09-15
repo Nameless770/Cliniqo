@@ -784,3 +784,78 @@ describe('self-registration', () => {
     expect(verified.rows[0]!.verified).toBe(true);
   });
 });
+
+/* --------------------------------------------------------- request correlation */
+
+/*
+ * Security review finding F12.
+ *
+ * `audit_event.request_id` existed in the schema from phase 2 and was written as NULL by
+ * every one of the twenty-six call sites, so the rows one request produced could only be
+ * related by actor and timestamp. The failure mode is specifically a silent one — the
+ * column reads as a feature and every row looks well-formed — which is why the check is
+ * here, against a real server, rather than only in the static invariants.
+ */
+describe('request correlation', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  it('gives every response its own correlation id', async () => {
+    const first = await visitor().head('/login');
+    const second = await visitor().head('/login');
+
+    const a = first.headers.get('x-request-id') ?? '';
+    const b = second.headers.get('x-request-id') ?? '';
+
+    expect(a).toMatch(UUID);
+    expect(b).toMatch(UUID);
+    // A reused id would group unrelated work under one reference, which is worse than none.
+    expect(a).not.toBe(b);
+  });
+
+  it('records the id on the audit rows a real request writes', async () => {
+    const session = visitor();
+    const page = await signIn(session, '/login', cast.adminEmail);
+    expect(page.url).toContain('/dashboard');
+
+    /*
+     * Pinned to this actor, and deliberately NOT filtered on `request_id IS NOT NULL`.
+     * Filtering on it would make the query skip past an uncorrelated row to an older
+     * correlated one and report success — the vacuous pass this suite exists to avoid.
+     */
+    const actor = await appPool.query<{ id: string }>(
+      `SELECT id FROM user_account WHERE email = $1`,
+      [cast.adminEmail],
+    );
+    const logged = await appPool.query<{ request_id: string | null }>(
+      `SELECT request_id FROM audit_event
+        WHERE action = 'auth.login' AND outcome = 'allowed' AND actor_user_id = $1
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [actor.rows[0]!.id],
+    );
+
+    expect(logged.rowCount, 'the sign-in wrote an audit row').toBe(1);
+    expect(logged.rows[0]!.request_id, 'that row carries a correlation id').toMatch(UUID);
+  });
+
+  it('never lets one correlation id span two sessions', async () => {
+    /*
+     * The property that makes the id evidence rather than decoration. An id shared across
+     * sessions is what an inbound, client-supplied `x-request-id` would produce — one
+     * account stitching its reads onto another's reference. Middleware overwrites the
+     * inbound header precisely so this cannot happen; this asserts the result.
+     */
+    const grouped = await appPool.query<{ request_id: string; sessions: number }>(
+      `SELECT request_id, count(DISTINCT session_id)::int AS sessions
+         FROM audit_event
+        WHERE request_id IS NOT NULL AND session_id IS NOT NULL
+        GROUP BY request_id`,
+    );
+
+    expect(grouped.rowCount, 'the journeys above wrote correlated rows').toBeGreaterThan(
+      0,
+    );
+    for (const row of grouped.rows) {
+      expect(row.sessions, `request ${row.request_id} spans one session`).toBe(1);
+    }
+  });
+});

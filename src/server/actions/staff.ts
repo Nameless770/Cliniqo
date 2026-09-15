@@ -8,17 +8,20 @@ import { ROLE_CODES } from '@/lib/roles';
 import { AuthorizationError } from '@/server/auth/authorize';
 import {
   createStaffAccount,
-  redeemSetupToken,
   reissueSetupToken,
   setStaffRoles,
   setStaffStatus,
 } from '@/server/data-access/staff';
-import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
-import { requestMeta, safeInet } from '@/server/auth/session';
 
 /**
- * Staff management actions. Administrator only — except `claimAccountAction`, which is
- * necessarily unauthenticated and is guarded differently.
+ * Staff management actions. EVERY action in this file is administrator-only.
+ *
+ * That uniformity is the point, and it is why `claimAccountAction` was moved out to
+ * `actions/account-claim.ts` (security review finding F16): an unauthenticated endpoint
+ * sitting among these invited a new action to be written by copying a neighbour and
+ * inheriting an assumption that did not apply to it. Nothing here is a boundary on its own
+ * — each action's authorization is re-checked in the data-access layer it calls — but a
+ * module with one trust level is one a reviewer can read as a unit.
  */
 
 export type StaffFormState = {
@@ -188,67 +191,4 @@ export async function setStatusAction(
     if (authz) return authz;
     throw error;
   }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Unauthenticated: claim an account                                          */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Password policy, applied only where a password is SET — never at login.
- *
- * Length over composition: a 12-character passphrase beats "P@ssw0rd!" on every measure
- * that matters, and composition rules mostly produce predictable substitutions.
- */
-const claimInput = z
-  .object({
-    token: z.string().min(20).max(200),
-    password: z
-      .string()
-      .min(12, 'Use at least 12 characters. A short phrase works well.')
-      .max(1024),
-    confirm: z.string(),
-  })
-  .refine((v) => v.password === v.confirm, {
-    path: ['confirm'],
-    message: 'Those do not match.',
-  });
-
-/**
- * Claim a new account with a setup token.
- *
- * Rate limited per IP like the login form, because this endpoint accepts a bearer token
- * and would otherwise be brute-forceable. The token is 256 bits, so guessing is not a
- * realistic attack — but the limiter costs nothing and closes the enumeration angle.
- */
-export async function claimAccountAction(
-  _previous: StaffFormState,
-  formData: FormData,
-): Promise<StaffFormState> {
-  const parsed = claimInput.safeParse(formFields(formData));
-  if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
-
-  const { ip: rawIp } = await requestMeta();
-  const ip = safeInet(rawIp);
-
-  const verdict = await checkIpRateLimit(ip);
-  if (!verdict.allowed) {
-    return {
-      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
-    };
-  }
-
-  const result = await redeemSetupToken(parsed.data.token, parsed.data.password, ip);
-
-  if (!result.ok) {
-    await recordAttempt({ email: 'setup-token', ip, succeeded: false });
-    // One message for wrong, used, revoked, and expired — see the data layer.
-    return {
-      message:
-        'That setup link is not valid. It may have expired or already been used. Ask an administrator for a new one.',
-    };
-  }
-
-  await recordAttempt({ email: result.email, ip, succeeded: true });
-  return { ok: true, message: 'Password set. You can now sign in.' };
 }

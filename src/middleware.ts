@@ -40,6 +40,27 @@ export function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
 
   /*
+   * Request correlation id — security review finding F12.
+   *
+   * `audit_event.request_id` has existed since phase 2 and was never populated, so the
+   * several rows one request writes — a patient opening triage writes three actions across
+   * four rows; a Google sign-up writes `staff.create`, `identity.link` and `auth.login` —
+   * were relatable only by actor and timestamp. With this, "what did this one request
+   * touch" is a single indexed predicate, which is the question asked during a breach
+   * investigation, on the 60-day clock, about a request that happened months ago.
+   *
+   * GENERATED HERE, NEVER READ FROM THE REQUEST. An inbound `x-request-id` is
+   * attacker-controlled text, and this value is written into an append-only legal record:
+   * a caller could stitch their reads onto someone else's id, or issue a fresh one per
+   * request to defeat the grouping this exists to provide. `new Headers(request.headers)`
+   * followed by `.set()` below overwrites whatever arrived, so there is no path for an
+   * inbound value to survive. Infrastructure trace headers are deliberately not honoured
+   * for the same reason; correlating to a load balancer's id is an ops concern, and the
+   * response header below is how that is done without trusting input.
+   */
+  const requestId = crypto.randomUUID();
+
+  /*
    * `'unsafe-eval'` — DEVELOPMENT ONLY, and it must stay that way.
    *
    * React's development build calls eval() to rebuild stack traces across the
@@ -123,8 +144,24 @@ export function middleware(request: NextRequest) {
    */
   headers.set('x-pathname', request.nextUrl.pathname);
 
+  /*
+   * Read back by `currentRequestId()` in server/audit/log.ts, which stamps it onto every
+   * audit row. Set on the REQUEST, like the two above, so it reaches server components and
+   * server actions through `headers()`.
+   */
+  headers.set('x-request-id', requestId);
+
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('Content-Security-Policy', csp);
+
+  /*
+   * Also on the response, which is the other half of F12: a user reporting an error has
+   * something to quote, and support can find the exact audit rows from it. Safe to expose
+   * — it is a random v4 UUID carrying no data, and it is already recorded next to the
+   * events it identifies. Per-response by construction, so unlike a value rendered into
+   * the page it cannot go stale against a later client-side navigation.
+   */
+  response.headers.set('x-request-id', requestId);
 
   return response;
 }

@@ -1434,6 +1434,93 @@ void randomUUID;
   );
 }
 
+/* ------------------------------------------- Request correlation (F12) */
+
+/*
+ * `audit_event.request_id` sat in the schema unpopulated for several phases, which is the
+ * failure mode this block guards: a column that exists, reads as a feature, and is null in
+ * every row. The three properties below are what make it evidence rather than decoration.
+ */
+{
+  const logCode = stripComments(read('src/server/audit/log.ts'));
+
+  check(
+    'Request correlation (F12)',
+    'middleware issues a request id per request',
+    middlewareCode.includes('const requestId = crypto.randomUUID()') &&
+      middlewareCode.includes("headers.set('x-request-id', requestId)"),
+  );
+
+  /*
+   * The id is written into an append-only legal record. Honouring an inbound header would
+   * let a caller stitch their reads onto someone else's id, or issue a fresh one per
+   * request to defeat the grouping entirely.
+   */
+  check(
+    'Request correlation (F12)',
+    'the id is generated, never read from the inbound request',
+    !middlewareCode.includes("get('x-request-id')"),
+  );
+
+  /*
+   * Resolved inside the writer, not passed by callers. Twenty-six call sites across eleven
+   * modules; one that forgets is one whose rows cannot be grouped, and nothing about the
+   * row would look wrong.
+   */
+  check(
+    'Request correlation (F12)',
+    'every audit row resolves the id centrally, so no call site can forget',
+    logCode.includes('requestId: input.requestId ?? (await currentRequestId())'),
+  );
+
+  check(
+    'Request correlation (F12)',
+    'a missing or malformed id yields null rather than failing the audit write',
+    logCode.includes('REQUEST_ID_SHAPE.test(value)') &&
+      /catch\s*{\s*return null;\s*}/.test(logCode),
+  );
+}
+
+/* ------------------------------------------ Action trust levels (F16) */
+
+/*
+ * An unauthenticated action sitting among administrator-only ones is how the next action
+ * gets written by copying a neighbour and inheriting a check that does not apply to it.
+ * Each action still authorizes itself; this keeps the MODULE readable as one trust level.
+ */
+{
+  const staffActions = stripComments(read('src/server/actions/staff.ts'));
+
+  check(
+    'Action trust levels (F16)',
+    'the unauthenticated claim action does not live among the admin-only ones',
+    !staffActions.includes('claimAccountAction') &&
+      existsSync('src/server/actions/account-claim.ts'),
+  );
+
+  check(
+    'Action trust levels (F16)',
+    'the claim action still rate-limits and still validates',
+    (() => {
+      const claim = stripComments(read('src/server/actions/account-claim.ts'));
+      return (
+        claim.includes('checkIpRateLimit(ip)') &&
+        claim.includes('claimInput.safeParse(formFields(formData))')
+      );
+    })(),
+  );
+
+  /*
+   * The admin response type carries `setupToken`, which the claim flow must never return.
+   * Separate types mean that is a compile error rather than a code-review catch.
+   */
+  check(
+    'Action trust levels (F16)',
+    'the claim response type cannot carry an admin-only setup token',
+    !stripComments(read('src/server/actions/account-claim.ts')).includes('setupToken'),
+  );
+}
+
 /* --------------------------------------------------------------- report */
 
 /*

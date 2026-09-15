@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 
 import { Button, Field, Input } from '@/components/ui';
-import { claimAccountAction, type StaffFormState } from '@/server/actions/staff';
+import { claimAccountAction, type ClaimFormState } from '@/server/actions/account-claim';
 
 /**
  * Password-setting form for a new staff member.
@@ -12,7 +12,7 @@ import { claimAccountAction, type StaffFormState } from '@/server/actions/staff'
  * so the action has a single input surface to validate.
  */
 export function ClaimForm({ token }: { token: string }) {
-  const [state, formAction, pending] = useActionState<StaffFormState, FormData>(
+  const [state, formAction, pending] = useActionState<ClaimFormState, FormData>(
     claimAccountAction,
     {},
   );
