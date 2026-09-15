@@ -1614,6 +1614,74 @@ check(
   /subjectFrom\(result\)\s*\|\|\s*null/.test(stripComments(audited)),
 );
 
+/* ------------------------------------------ Activity review (F17) */
+
+/*
+ * 164.308(a)(1)(ii)(D) asks for the review; 164.316(b)(1) asks for it documented. The
+ * failure mode is a review feature that exists and proves nothing: counts the reviewer
+ * chose, or a record they can edit afterwards.
+ */
+{
+  const review = stripComments(read('src/server/data-access/compliance-review.ts'));
+  const reviewAction = stripComments(read('src/server/actions/compliance-review.ts'));
+  const reviewMigration = read('drizzle/0023_audit_review.sql');
+
+  check(
+    'Activity review (F17)',
+    'only admin may file a review',
+    permissionsForRoles(['admin']).has('audit.review') &&
+      !permissionsForRoles(['doctor']).has('audit.review') &&
+      !permissionsForRoles(['receptionist']).has('audit.review'),
+  );
+
+  /*
+   * THE security property. If the counts came from the form, whoever files the review
+   * could report "nothing flagged" over a week that flagged fifty things — and that row
+   * is the artifact an auditor is shown. `recordReview` takes no findings argument at all.
+   */
+  check(
+    'Activity review (F17)',
+    'the reviewer cannot supply the findings — the server recomputes them',
+    /export async function recordReview\(\s*periodStart: Date,\s*periodEnd: Date,\s*notes: string,\s*\)/.test(
+      review,
+    ) &&
+      review.includes('const digest = await buildReviewDigest(periodStart, periodEnd)') &&
+      !reviewAction.includes('findings'),
+  );
+
+  /* An attestation that can be edited afterwards is not evidence of anything. */
+  check(
+    'Activity review (F17)',
+    'a filed review cannot be edited or deleted by the application',
+    /REVOKE UPDATE, DELETE, TRUNCATE ON "audit_review" FROM cliniqo_app/.test(
+      reviewMigration,
+    ),
+  );
+
+  /* A tick box is what this finding exists to avoid. */
+  check(
+    'Activity review (F17)',
+    'a review must carry a written conclusion',
+    /notes:[\s\S]{0,120}\.min\((\d+)/.test(reviewAction) &&
+      Number(/notes:[\s\S]{0,120}\.min\((\d+)/.exec(reviewAction)?.[1] ?? 0) >= 10,
+  );
+
+  /* Reading the digest names patients, so it is a read of the log and audited as one. */
+  check(
+    'Activity review (F17)',
+    'building the digest is gated on audit.read and audited',
+    review.includes("permission: 'audit.read'") &&
+      review.includes("action: 'audit.read'"),
+  );
+
+  /* The signal no permission check can produce, because every such read is authorized. */
+  check(
+    'Activity review (F17)',
+    'the digest surfaces same-surname access',
+    review.includes('sameSurname') && review.includes('string_to_array'),
+  );
+}
+
 /* --------------------------------------------------------------- report */
 
 /*

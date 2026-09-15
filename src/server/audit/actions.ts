@@ -90,6 +90,10 @@ export const AUDIT_ACTIONS = [
   'staff.update',
   'role.assign',
   'audit.read',
+  /* An administrator attested that they reviewed a window of activity. Separate from
+     `audit.read`: reading the log and putting your name to a conclusion about it are
+     different acts, and only the second one is the safeguard 164.308(a)(1)(ii)(D) asks for. */
+  'audit.review',
   /* Producing a §164.528 accounting for a patient. */
   'disclosure.accounting',
   'clinic.configure',

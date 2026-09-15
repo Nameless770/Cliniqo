@@ -506,6 +506,38 @@ account does not let anyone rewrite the log.
 - Partial where `outcome = 'denied'` — attempted boundary violations. Small, and the most
   interesting index in the schema.
 
+### `audit_review`
+
+Added with the activity review. A completed review of system activity —
+§164.308(a)(1)(ii)(D) requires the review, §164.316(b)(1) requires it documented. The
+filterable viewer answered "what happened"; nothing answered "did anybody check".
+
+`id` · | `clinic_id` FK · | `period_start` / `period_end` timestamptz · |
+`reviewed_by` FK · | `reviewed_at` · | `notes` text · | `findings` jsonb ·
+
+**Index:** `(clinic_id, period_start DESC)`.
+
+**Check:** `period_start < period_end`.
+
+**Privileges:** `cliniqo_app` holds INSERT and SELECT only — `UPDATE`, `DELETE` and
+`TRUNCATE` are revoked in migration 0023. An attestation the application can rewrite
+afterwards is not evidence that a review happened. Deliberately NOT given `audit_event`'s
+belt-and-braces trigger: that catches the schema owner too, because the log is the legal
+record with a six-year duty; this is the smaller claim that the running application cannot
+edit an attestation.
+
+**No unique constraint on the period**, on purpose: a second reviewer covering the same
+window is a stronger control, not a conflict. "Has this period been reviewed" is `EXISTS`.
+
+**`findings` holds counts only, and the server computes them.** It is frozen at review time
+because the log keeps growing and the same query re-run next year returns something else —
+a record naming only a period could not show what was in front of the reviewer. The counts
+are never taken from the form: whoever files the review would otherwise be able to report
+"nothing flagged" over a week that flagged fifty things, and this row is the artifact an
+auditor is shown. No patient identifiers, so the review history can be handed over as-is.
+
+---
+
 ### `break_glass_grant`
 
 `id` · | `clinic_id` FK · | `user_id` FK · | `patient_id` FK **I** | `reason` text (required) · |

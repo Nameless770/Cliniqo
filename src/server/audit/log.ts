@@ -52,7 +52,8 @@ export type AuditEntityType =
   | 'user_identity'
   | 'patient_identity'
   | 'patient_merge'
-  | 'audit_event';
+  | 'audit_event'
+  | 'audit_review';
 
 export type AuditInput = {
   clinicId: string;

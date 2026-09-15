@@ -82,6 +82,11 @@ export const PERMISSIONS = [
   'staff.update',
   'role.assign',
   'audit.read',
+  /* Recording that a window of system activity was reviewed (164.308(a)(1)(ii)(D)).
+   * Split from `audit.read` for the same reason `note.sign` is split from `note.create`:
+   * attesting to something is a different act from looking at it, and the attestation is
+   * the compliance artifact. */
+  'audit.review',
   'clinic.configure',
 
   /* Emergency access — §164.312(a)(2)(ii). Granted, but every use is logged loudly and
@@ -183,6 +188,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, readonly Permission[]> = {
     'staff.update',
     'role.assign',
     'audit.read',
+    'audit.review',
     'clinic.configure',
   ],
 };
