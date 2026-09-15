@@ -12,8 +12,10 @@
 
 import { sql } from 'drizzle-orm';
 import {
+  check,
   date,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -269,5 +271,118 @@ export const patientFlag = pgTable(
     index('patient_flag_current_idx')
       .on(t.patientId)
       .where(sql`${t.archivedAt} is null`),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A duplicate chart folded into the one that survives.
+ *
+ * ==========================================================================
+ * WHY THIS TABLE EXISTS AT ALL
+ * ==========================================================================
+ *
+ * Duplicate charts are a patient-safety problem, not a tidiness problem: an allergy
+ * recorded on chart A is invisible to a clinician reading chart B. Two things in this
+ * system produce them on purpose. The front desk creates a second record when a search
+ * misses — which is why `patient_last_name_trgm_idx` exists — and patient
+ * self-registration NEVER matches an existing chart, because nothing a sign-up form
+ * collects proves identity and attaching a stranger to someone else's record is how a
+ * portal leaks a chart. Both choices are right, and both are only safe if staff can
+ * reconcile the result afterwards. That is this table.
+ *
+ * ==========================================================================
+ * THE ROWS MOVE. THE POINTER ALONE IS NOT ENOUGH.
+ * ==========================================================================
+ *
+ * `patient.merged_into_patient_id` marks the duplicate, but a merge that ONLY set that
+ * pointer would require every query in the system to remember to follow it, and the one
+ * that forgets renders an allergy invisible — reintroducing precisely the failure the
+ * merge exists to fix. So the child rows are repointed at the survivor, and the pointer
+ * is kept for provenance and for redirecting anyone who opens the old chart.
+ *
+ * `manifest` records exactly which rows moved, per table, so the merge can be reversed.
+ * That matters because the failure mode here is severe and asymmetric: merging two charts
+ * that turn out to be two different people has combined two individuals' records, which
+ * is a breach — not a typo. Ids and counts only; never clinical content.
+ *
+ * ==========================================================================
+ * WHAT DOES NOT MOVE
+ * ==========================================================================
+ *
+ * `audit_event.subject_patient_id` stays on the duplicate, permanently. A §164.528
+ * accounting for the old MRN must still answer "who read this chart", and the answer
+ * cannot be "nobody, it was merged". The application role also holds no UPDATE on
+ * `audit_event`, so this is guaranteed by privilege rather than by intention.
+ *
+ * `break_glass_grant` stays for the same reason: it records that someone took emergency
+ * access to THAT chart, which remains true afterwards.
+ */
+export const patientMerge = pgTable(
+  'patient_merge',
+  {
+    id: primaryId(),
+    clinicId: uuid('clinic_id')
+      .notNull()
+      .references(() => clinic.id),
+
+    /** The chart that remains. */
+    survivingPatientId: uuid('surviving_patient_id')
+      .notNull()
+      .references((): AnyPgColumn => patient.id),
+    /** The chart folded in. Keeps its MRN and its row forever — see the module note. */
+    duplicatePatientId: uuid('duplicate_patient_id')
+      .notNull()
+      .references((): AnyPgColumn => patient.id),
+
+    /**
+     * Why staff believe these are one person. Required, and deliberately free text: the
+     * useful answer is "checked driver's licence at the desk", which no enum anticipates.
+     *
+     * Administrative justification written by staff, so it is recorded in the audit row's
+     * `purpose` as well. It is not clinical content about the patient.
+     */
+    reason: text('reason').notNull(),
+
+    /**
+     * Exactly which rows moved, keyed by table: `{ appointment: [uuid, ...], ... }`.
+     *
+     * Ids and counts, never content. Reversal needs this because by then the surviving
+     * chart may have acquired rows of its own, and "move back everything that is there"
+     * would take those too.
+     */
+    manifest: jsonb('manifest').$type<Record<string, string[]>>().notNull(),
+
+    performedBy: uuid('performed_by')
+      .notNull()
+      .references(() => userAccount.id),
+    performedAt: timestamp('performed_at', { withTimezone: true }).notNull().defaultNow(),
+
+    /* Reversal. The row is never deleted — an undone merge is itself history. */
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    reversedBy: uuid('reversed_by').references(() => userAccount.id),
+    reversalReason: text('reversal_reason'),
+  },
+  (t) => [
+    /**
+     * A chart can be folded away once at a time.
+     *
+     * PARTIAL on `reversed_at is null`: a merge that was reversed must not block a later,
+     * correct merge of the same chart — the first attempt being wrong is exactly when a
+     * second one is needed.
+     */
+    uniqueIndex('patient_merge_duplicate_live_idx')
+      .on(t.duplicatePatientId)
+      .where(sql`${t.reversedAt} is null`),
+
+    /** "What was folded into this chart", for the survivor's provenance panel. */
+    index('patient_merge_surviving_idx').on(t.survivingPatientId, t.performedAt.desc()),
+
+    /** A chart cannot be merged into itself. Cheap, and the mistake is easy to make. */
+    check(
+      'patient_merge_distinct',
+      sql`${t.survivingPatientId} <> ${t.duplicatePatientId}`,
+    ),
   ],
 );

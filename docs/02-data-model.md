@@ -247,6 +247,42 @@ Medical alerts: infection control, fall risk, safeguarding concerns.
 
 ---
 
+### `patient_merge`
+
+Added after this document was first written. A duplicate chart folded into the one that
+survives — the reconciliation step that makes two deliberate sources of duplicates safe:
+a front-desk search that misses, and self-registration, which never matches an existing
+record because nothing a sign-up form collects proves identity.
+
+`id` · | `clinic_id` FK · | `surviving_patient_id` FK **C** | `duplicate_patient_id` FK **C** |
+`reason` text · | `manifest` jsonb · | `performed_by` / `performed_at` · |
+`reversed_at` / `reversed_by` / `reversal_reason` ·
+
+**Index:** `(duplicate_patient_id)` unique, partial where `reversed_at IS NULL` — a chart
+can be folded away once at a time, and a reversed merge must not block a later correct one.
+`(surviving_patient_id, performed_at DESC)` for the provenance panel.
+
+**Check:** `surviving_patient_id <> duplicate_patient_id`.
+
+**Trigger:** `cliniqo_patient_merge_no_chains` refuses an insert when either chart has
+already been merged away. Flat structure, so a reversal is always the straight inverse of
+one manifest.
+
+**The rows move.** `patient.merged_into_patient_id` marks the duplicate, but the child rows
+are repointed at the survivor as well — appointments, notes, prescriptions, allergies,
+flags, invoices and triage conversations. A pointer-only merge would need every query in
+the system to follow it, and the one that forgot would hide an allergy, which is the
+failure the merge exists to fix. `manifest` records the moved ids per table so a reversal
+takes back exactly those and not rows the survivor has acquired since.
+
+**What never moves.** `audit_event.subject_patient_id` stays on the duplicate — a §164.528
+accounting for the old MRN must still answer "who read this chart", and the application
+role holds no `UPDATE` on `audit_event` in any case. `break_glass_grant` stays for the same
+reason. Outstanding portal invitations are revoked rather than retargeted; a live portal
+account moves only if the survivor has none, and is otherwise archived.
+
+---
+
 ## 3. Clinic configuration and scheduling
 
 ### `clinic`

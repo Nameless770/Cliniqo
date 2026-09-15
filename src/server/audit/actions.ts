@@ -41,6 +41,11 @@ export const AUDIT_ACTIONS = [
   'patient.export',
   /* Staff invited the patient to the self-service portal. */
   'patient.portal_invite',
+  /* A duplicate chart folded into the one that survives, and that merge undone.
+     Separate actions because they are separate events: a reviewer reading the log must be
+     able to see that a merge was reversed without inferring it from a second merge row. */
+  'patient.merge',
+  'patient.unmerge',
 
   'allergy.read',
   'allergy.create',
@@ -125,6 +130,8 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'patient.archive',
   'patient.export',
   'patient.portal_invite',
+  'patient.merge',
+  'patient.unmerge',
   'allergy.read',
   'allergy.create',
   'allergy.update',

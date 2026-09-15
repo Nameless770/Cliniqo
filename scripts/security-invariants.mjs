@@ -1521,6 +1521,99 @@ void randomUUID;
   );
 }
 
+/* ------------------------------------------------ Patient merge (safety) */
+
+/*
+ * A merge moves clinical rows between records. Done wrong it combines two people's charts,
+ * which is a breach; left undone, an allergy on one chart stays invisible on the other.
+ * Both failure modes are silent, so the properties that prevent them are asserted here.
+ */
+{
+  const merge = stripComments(read('src/server/data-access/patient-merge.ts'));
+  const mergeMigration = read('drizzle/0022_patient_merge.sql');
+
+  check(
+    'Patient merge',
+    'only admin may merge — not the front desk, not a clinician',
+    permissionsForRoles(['admin']).has('patient.merge') &&
+      !permissionsForRoles(['receptionist']).has('patient.merge') &&
+      !permissionsForRoles(['doctor']).has('patient.merge'),
+  );
+
+  /*
+   * The audit trail of a folded-away chart is what a §164.528 accounting for the old MRN
+   * reads. Moving those rows would erase the answer — and the app role holds no UPDATE on
+   * audit_event anyway, so a line that tried would fail at runtime instead of review.
+   */
+  check(
+    'Patient merge',
+    'audit rows and break-glass grants are never moved by a merge',
+    !/key:\s*'audit_event'/.test(merge) && !/key:\s*'break_glass_grant'/.test(merge),
+  );
+
+  /*
+   * Ordering, learned the hard way: the no-chains trigger fires BEFORE INSERT and reads
+   * `patient.merged_into_patient_id`. Setting the pointer first means the transaction's
+   * own update is what the trigger sees, and EVERY merge is refused as a chain. The whole
+   * feature was inert until this order was corrected.
+   */
+  check(
+    'Patient merge',
+    'the merge record is inserted before the pointer is set',
+    merge.indexOf('.insert(patientMerge)') > 0 &&
+      merge.indexOf('.insert(patientMerge)') <
+        merge.indexOf('mergedIntoPatientId: survivingPatientId'),
+  );
+
+  /* Chains are refused in the database, not only in the code that calls it. */
+  check(
+    'Patient merge',
+    'no merge chains, enforced by a trigger',
+    mergeMigration.includes('cliniqo_patient_merge_no_chains') &&
+      mergeMigration.includes('BEFORE INSERT ON "patient_merge"'),
+  );
+
+  /*
+   * Reversal moves back exactly what the manifest names. "Move back everything on the
+   * survivor" would hand one person the other's rows — the failure this feature corrects,
+   * performed in reverse.
+   */
+  check(
+    'Patient merge',
+    'reversal restores only the rows the manifest names',
+    merge.includes('inArray(table.id, ids)'),
+  );
+
+  /* Both charts get an audit row, so neither accounting ends without an explanation. */
+  check(
+    'Patient merge',
+    'the merge is audited against both charts',
+    (merge.match(/action: 'patient\.merge'/g) ?? []).length >= 2,
+  );
+
+  /* A bearer credential must never be silently retargeted at a different chart. */
+  check(
+    'Patient merge',
+    'outstanding portal invitations are revoked, never moved',
+    merge.includes('patient_setup_token_revoked') &&
+      !/patientSetupToken[\s\S]{0,200}set\(\{\s*patientId/.test(merge),
+  );
+}
+
+/* --------------------------------------- Audited subject normalisation */
+
+/*
+ * Every `subjectFrom` in the data-access layer ends `?? ''`, because the row it reads may
+ * be null. That empty string reaching PostgreSQL as a uuid raises `invalid input syntax`,
+ * which turns a clean "not found" into a 500 AND loses the audit row for the attempt.
+ * Normalised centrally; asserted here because the next `?? ''` will be written the same way.
+ */
+check(
+  'Audit',
+  'an unresolved audit subject becomes null, never an empty uuid',
+  /subjectFrom\(result\)\s*\|\|\s*null/.test(stripComments(audited)),
+);
+
 /* --------------------------------------------------------------- report */
 
 /*

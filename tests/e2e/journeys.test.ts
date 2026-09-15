@@ -859,3 +859,40 @@ describe('request correlation', () => {
     }
   });
 });
+
+/* ------------------------------------------------------------------ patient merge */
+
+/*
+ * Merge is administrator-only. The integration suite covers what a merge DOES; these two
+ * cover who can reach it, over real HTTP, through the layout and the page guard — the
+ * layer where a missing `guardPage` looks fine in review and is wide open in production.
+ */
+describe('merging a duplicate chart', () => {
+  it('lets an administrator open the merge screen', async () => {
+    const session = visitor();
+    await signIn(session, '/login', cast.adminEmail);
+
+    const page = await session.get(`/patients/${cast.patientId}/merge`);
+
+    expect(page.status).toBe(200);
+    expect(page.url).toContain('/merge');
+    expect(text(page.html)).toMatch(/merge a duplicate into this chart/i);
+  });
+
+  it('refuses the front desk, who can spot a duplicate but not commit one', async () => {
+    const desk = visitor();
+    await signIn(desk, '/login', cast.receptionEmail);
+
+    const page = await desk.get(`/patients/${cast.patientId}/merge`);
+
+    expect(page.url).toContain('/forbidden');
+    expect(text(page.html)).not.toMatch(/merge a duplicate into this chart/i);
+
+    /* The refusal is recorded, like every other boundary refusal. */
+    const denied = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM audit_event
+        WHERE action = 'authz.denied' AND metadata->>'permission' = 'patient.merge'`,
+    );
+    expect(Number(denied.rows[0]!.n)).toBeGreaterThan(0);
+  });
+});
