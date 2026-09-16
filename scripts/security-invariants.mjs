@@ -1434,6 +1434,88 @@ void randomUUID;
   );
 }
 
+/* --------------------------------------------------------- patient visit notes */
+
+/*
+ * Patients reading their own notes (§164.524). The page is only as safe as the query behind
+ * it, so these are about the query.
+ */
+{
+  const portalNotes = stripComments(read('src/server/portal/notes.ts'));
+  const staffNotes = stripComments(read('src/server/data-access/notes.ts'));
+  const noteSchemas = read('src/lib/note-schemas.ts');
+  const migration = read('drizzle/0022_note_portal_visibility.sql');
+  const visibilityControl = stripComments(
+    read('src/app/(staff)/notes/[id]/PortalVisibility.tsx'),
+  );
+
+  /* A draft is a clinician's unfinished thinking, not yet part of the record. */
+  check(
+    'Patient visit notes',
+    'the portal reads signed notes only, and only their frozen versions',
+    /inArray\(visitNote\.status, \['signed', 'amended'\]\)/.test(portalNotes) &&
+      /isNotNull\(visitNoteVersion\.frozenAt\)/.test(portalNotes),
+  );
+
+  /* The patient comes from the session. A function that took a patient id could be pointed at anyone. */
+  check(
+    'Patient visit notes',
+    "the portal reads only the session's own patient",
+    /eq\(visitNote\.patientId, session\.patientId\)/.test(portalNotes) &&
+      /requirePatientSession\(\)/.test(portalNotes) &&
+      !/export async function listMyVisitSummaries\([^)]+\)/.test(portalNotes),
+  );
+
+  /*
+   * A withheld note's TEXT is never fetched for the portal: the versions query is given only
+   * the visible notes' ids. Filtering after fetching would put the text in memory, one
+   * mistake away from the page.
+   */
+  check(
+    'Patient visit notes',
+    "a withheld note's content is never queried for the portal",
+    /visible\.map\(\(note\) => note\.id\)/.test(portalNotes) &&
+      /withheldAt === null/.test(portalNotes),
+  );
+
+  check(
+    'Patient visit notes',
+    'reading visit notes in the portal is audited as the patient',
+    /auditAsPatient\(tx, session, \{\s*action: 'note\.read'/.test(portalNotes),
+  );
+
+  /* Withholding is a clinical judgement about harm: clinicians only, checked in the data layer. */
+  const setter =
+    /export async function setNotePortalVisibility[\s\S]*?\n}/.exec(staffNotes)?.[0] ??
+    '';
+  check(
+    'Patient visit notes',
+    'only a clinician who can sign notes may withhold or release one',
+    /permission: 'note\.sign'/.test(setter) && /auditedWrite\(/.test(setter),
+  );
+
+  /* A denial of access with no recorded basis cannot be reviewed — in the schema AND the database. */
+  check(
+    'Patient visit notes',
+    'withholding a note requires a reason, in the form and in the database',
+    /intent: z\.literal\('withhold'\)[\s\S]*?reason: z[\s\S]*?\.min\(10/.test(
+      noteSchemas,
+    ) && /CHECK[\s\S]*portal_withheld_reason/.test(migration),
+  );
+
+  /* The reason is clinical free text. The interactive control must not be handed it. */
+  check(
+    'Patient visit notes',
+    'the withhold control is given no clinical text',
+    visibilityControl.length > 0 &&
+      !/reason\s*[:}]\s*\w/i.test(
+        /export function PortalVisibility\(\{[\s\S]*?\}: \{[\s\S]*?\}\)/.exec(
+          visibilityControl,
+        )?.[0] ?? 'reason: x',
+      ),
+  );
+}
+
 /* --------------------------------------------------------------- report */
 
 /*

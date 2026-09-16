@@ -70,6 +70,9 @@ export default async function PortalHomePage({
             </p>
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+            <Link href="/portal/visits" style={{ fontSize: 'var(--text-sm)' }}>
+              Visit notes
+            </Link>
             <Link href="/portal/account" style={{ fontSize: 'var(--text-sm)' }}>
               Your account
             </Link>

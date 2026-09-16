@@ -96,6 +96,9 @@ export type NoteWithVersions = {
   authorName: string;
   signedAt: Date | null;
   rowVersion: number;
+  /** Set while a clinician is holding this note back from the patient's portal. */
+  portalWithheldAt: Date | null;
+  portalWithheldReason: string | null;
   versions: NoteVersionRow[];
 };
 
@@ -182,6 +185,8 @@ export async function getNote(
           status: visitNote.status,
           signedAt: visitNote.signedAt,
           rowVersion: visitNote.version,
+          portalWithheldAt: visitNote.portalWithheldAt,
+          portalWithheldReason: visitNote.portalWithheldReason,
           authorName: userAccount.fullName,
         })
         .from(visitNote)
@@ -244,6 +249,8 @@ export async function getPatientNotes(patientId: string): Promise<NoteWithVersio
           status: visitNote.status,
           signedAt: visitNote.signedAt,
           rowVersion: visitNote.version,
+          portalWithheldAt: visitNote.portalWithheldAt,
+          portalWithheldReason: visitNote.portalWithheldReason,
           authorName: userAccount.fullName,
         })
         .from(visitNote)
@@ -292,6 +299,8 @@ export async function getNoteForAppointment(
           status: visitNote.status,
           signedAt: visitNote.signedAt,
           rowVersion: visitNote.version,
+          portalWithheldAt: visitNote.portalWithheldAt,
+          portalWithheldReason: visitNote.portalWithheldReason,
           authorName: userAccount.fullName,
         })
         .from(visitNote)
@@ -716,5 +725,84 @@ export async function listUnsignedNotes(): Promise<UnsignedNoteQueue> {
       };
     },
     (result) => ({ resultCount: result.rows.length, labels: { scope: result.scope } }),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Patient portal visibility                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type PortalVisibilityResult =
+  { ok: true } | { ok: false; reason: 'not_found' | 'not_signed' | 'unchanged' };
+
+/**
+ * Hold a signed note back from the patient's portal, or release it again.
+ *
+ * `note.sign`: the same clinicians who can put a note into the record decide whether a
+ * patient reads it online yet. A receptionist or an administrator cannot — withholding is a
+ * clinical judgement about harm, and CLAUDE.md keeps clinical judgement with clinicians.
+ *
+ * Only signed or amended notes. A draft is never shown to the patient in the first place,
+ * so there is nothing to withhold. Content is not touched: this changes who may see the note
+ * through the portal, never what it says, so the version chain and its hashes are unaffected
+ * and the row version is not bumped — a colleague mid-way through an addendum is not
+ * interrupted by a conflict.
+ *
+ * The reason goes into the audit row's `purpose`, the field reviewers read. The note's
+ * content does not go anywhere near the audit log.
+ */
+export async function setNotePortalVisibility(
+  noteId: string,
+  patientId: string,
+  change: { withhold: true; reason: string } | { withhold: false },
+): Promise<PortalVisibilityResult> {
+  return auditedWrite(
+    {
+      permission: 'note.sign',
+      action: change.withhold ? 'note.withhold' : 'note.release',
+      entityType: 'visit_note',
+      entityId: noteId,
+      subjectPatientId: patientId,
+      purpose: change.withhold ? change.reason : null,
+    },
+    async (tx, session): Promise<PortalVisibilityResult> => {
+      const [note] = await tx
+        .select({ status: visitNote.status, withheldAt: visitNote.portalWithheldAt })
+        .from(visitNote)
+        .where(
+          and(
+            eq(visitNote.id, noteId),
+            eq(visitNote.patientId, patientId),
+            eq(visitNote.clinicId, session.clinicId),
+            isNull(visitNote.archivedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!note) return { ok: false, reason: 'not_found' };
+      if (note.status === 'draft') return { ok: false, reason: 'not_signed' };
+      if (change.withhold === (note.withheldAt !== null)) {
+        return { ok: false, reason: 'unchanged' };
+      }
+
+      await tx
+        .update(visitNote)
+        .set(
+          change.withhold
+            ? {
+                portalWithheldAt: new Date(),
+                portalWithheldBy: session.userId,
+                portalWithheldReason: change.reason,
+              }
+            : {
+                portalWithheldAt: null,
+                portalWithheldBy: null,
+                portalWithheldReason: null,
+              },
+        )
+        .where(and(eq(visitNote.id, noteId), eq(visitNote.clinicId, session.clinicId)));
+
+      return { ok: true };
+    },
   );
 }

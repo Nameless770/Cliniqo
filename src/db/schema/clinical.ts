@@ -11,6 +11,7 @@
 
 import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   integer,
   pgTable,
@@ -63,11 +64,36 @@ export const visitNote = pgTable(
     signedAt: timestamp('signed_at', { withTimezone: true }),
     signedBy: uuid('signed_by').references(() => userAccount.id),
 
+    /**
+     * Held back from the patient's portal.
+     *
+     * A signed note is visible to the patient by default: the right of access (§164.524)
+     * covers it, and in the US holding every note back until someone releases it risks being
+     * information blocking under the 21st Century Cures Act. What IS allowed is a clinician's
+     * judgement, about one specific note, that the patient reading it online now is
+     * reasonably likely to endanger their life or safety (§164.524(a)(3)(i)). These columns
+     * record that judgement: when, by whom, and why — the reason is required, enforced by the
+     * check constraint below, because a withheld note with no stated basis cannot be reviewed.
+     *
+     * Clearing them releases the note. Every withhold and release is also audited, so the
+     * history survives even though these columns only hold the current state.
+     */
+    portalWithheldAt: timestamp('portal_withheld_at', { withTimezone: true }),
+    portalWithheldBy: uuid('portal_withheld_by').references(() => userAccount.id),
+    portalWithheldReason: text('portal_withheld_reason'),
+
     ...timestamps(),
     ...rowVersion(),
     ...softDelete(() => userAccount.id),
   },
   (t) => [
+    /* All three together or none: a withheld note always says who decided and why. */
+    check(
+      'visit_note_portal_withheld_complete_chk',
+      sql`(${t.portalWithheldAt} is null and ${t.portalWithheldBy} is null and ${t.portalWithheldReason} is null)
+       or (${t.portalWithheldAt} is not null and ${t.portalWithheldBy} is not null
+           and length(btrim(${t.portalWithheldReason})) > 0)`,
+    ),
     /** The chart timeline. */
     index('visit_note_patient_time_idx').on(t.patientId, t.createdAt.desc()),
     /** One note per appointment. */

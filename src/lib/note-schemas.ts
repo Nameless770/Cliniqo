@@ -66,6 +66,32 @@ export const addendumInput = z.object({
   ...noteContentInput.shape,
 });
 
+/**
+ * Hold a signed note back from the patient's portal, or release it.
+ *
+ * A reason is REQUIRED to withhold, and more than a word: this is a clinician's judgement
+ * that reading the note online now is reasonably likely to endanger the patient
+ * (§164.524(a)(3)(i)), and a decision like that has to be reviewable later. The database
+ * enforces the same rule with a CHECK constraint.
+ */
+export const notePortalVisibilityInput = z.discriminatedUnion('intent', [
+  z.object({
+    intent: z.literal('withhold'),
+    noteId: z.uuid(),
+    patientId: z.uuid(),
+    reason: z
+      .string({ message: 'Say why this note should not be shown to the patient yet.' })
+      .trim()
+      .min(10, 'Say why this note should not be shown to the patient yet.')
+      .max(1000, 'Keep the reason to 1000 characters or fewer.'),
+  }),
+  z.object({
+    intent: z.literal('release'),
+    noteId: z.uuid(),
+    patientId: z.uuid(),
+  }),
+]);
+
 export const startNoteInput = z.object({
   patientId: z.uuid(),
   appointmentId: z.uuid().optional(),

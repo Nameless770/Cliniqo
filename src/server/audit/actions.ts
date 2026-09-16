@@ -64,6 +64,11 @@ export const AUDIT_ACTIONS = [
   'note.update',
   'note.sign',
   'note.amend',
+  /* A clinician holding one signed note back from the patient's portal, and letting it go
+     again. Their own actions, because a denial of access (§164.524(a)(3)) has to be answerable
+     by query: which notes were withheld, by whom, and whether they were later released. */
+  'note.withhold',
+  'note.release',
 
   'prescription.read',
   /* Likewise: a prescriber's recent-activity list, not one patient's history. */
@@ -143,6 +148,8 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'note.update',
   'note.sign',
   'note.amend',
+  'note.withhold',
+  'note.release',
   'prescription.read',
   'prescription.search',
   'prescription.create',
