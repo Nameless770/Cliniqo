@@ -154,8 +154,20 @@ describe('the secret at rest', () => {
 
     /* The authentication tag is the point: a modified secret must fail to open rather than
        decrypt to garbage that silently never matches a code — which would look like a
-       broken phone and send the user to re-enroll instead of raising an alarm. */
-    const flipped = `${iv}.${tag}.${ciphertext.slice(0, -1)}${ciphertext.endsWith('A') ? 'B' : 'A'}`;
+       broken phone and send the user to re-enroll instead of raising an alarm.
+     *
+     * Flip a bit in the ciphertext BYTES, not in a base64url character. A 20-byte
+     * ciphertext encodes to 27 characters, and the last one carries only four
+     * significant bits — the low two are spare — so an encoder emits one of just
+     * sixteen characters there, 'A' among them. The old swap replaced a trailing 'A'
+     * with 'B', which differs only in those spare bits: the string changed, the decoded
+     * bytes did not, GCM verified happily, and this test failed on a correct answer
+     * once every sixteen runs. It is the same trap documented in google-auth.test.ts,
+     * and CI caught it here. */
+    const tampered = Buffer.from(ciphertext, 'base64url');
+    tampered[0] = tampered[0]! ^ 0x01;
+    const flipped = `${iv}.${tag}.${tampered.toString('base64url')}`;
+
     expect(openSecret(flipped, sessionSecret)).toBeNull();
   });
 
