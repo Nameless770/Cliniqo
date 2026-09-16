@@ -126,6 +126,12 @@ export function AppShell({
             Change password
           </Link>
 
+          {/* Same reasoning, and deliberately beside it: two-step sign-in is a property of
+              your own credential, available to every account regardless of role. */}
+          <Link href="/account/security" className={styles.accountLink}>
+            Two-step sign-in
+          </Link>
+
           {/*
             Sign out is a FORM, not a link.
             A GET link can be triggered by any <img> tag or prefetch, which turns

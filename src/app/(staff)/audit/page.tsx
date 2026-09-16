@@ -115,6 +115,14 @@ export default async function AuditPage({
           {result.total} events. Append-only, retained six years. Your review of this page
           is itself recorded.
         </p>
+        {/*
+          This page answers "what happened" and assumes you know what to search for.
+          §164.308(a)(1)(ii)(D) asks the other question — "is anything here worth a second
+          look, and did anybody check?" — which is what the review screen is for.
+        */}
+        <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--text-sm)' }}>
+          <Link href="/audit/review">Weekly activity review →</Link>
+        </p>
       </div>
 
       <form

@@ -43,6 +43,7 @@ export default async function StaffPage() {
           passwordSet: s.passwordSet,
           hasLiveInvitation: s.hasLiveInvitation,
           signsInWithGoogle: s.signsInWithGoogle,
+          mfaEnabled: s.mfaEnabled,
           awaitingRole: s.awaitingRole,
         }))}
       />

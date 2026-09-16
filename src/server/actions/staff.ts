@@ -8,17 +8,21 @@ import { ROLE_CODES } from '@/lib/roles';
 import { AuthorizationError } from '@/server/auth/authorize';
 import {
   createStaffAccount,
-  redeemSetupToken,
   reissueSetupToken,
+  resetStaffMfa,
   setStaffRoles,
   setStaffStatus,
 } from '@/server/data-access/staff';
-import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
-import { requestMeta, safeInet } from '@/server/auth/session';
 
 /**
- * Staff management actions. Administrator only — except `claimAccountAction`, which is
- * necessarily unauthenticated and is guarded differently.
+ * Staff management actions. EVERY action in this file is administrator-only.
+ *
+ * That uniformity is the point, and it is why `claimAccountAction` was moved out to
+ * `actions/account-claim.ts` (security review finding F16): an unauthenticated endpoint
+ * sitting among these invited a new action to be written by copying a neighbour and
+ * inheriting an assumption that did not apply to it. Nothing here is a boundary on its own
+ * — each action's authorization is re-checked in the data-access layer it calls — but a
+ * module with one trust level is one a reviewer can read as a unit.
  */
 
 export type StaffFormState = {
@@ -190,65 +194,39 @@ export async function setStatusAction(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Unauthenticated: claim an account                                          */
-/* -------------------------------------------------------------------------- */
-
 /**
- * Password policy, applied only where a password is SET — never at login.
+ * Remove another account's second factor — the lost phone with the lost recovery codes.
  *
- * Length over composition: a 12-character passphrase beats "P@ssw0rd!" on every measure
- * that matters, and composition rules mostly produce predictable substitutions.
- */
-const claimInput = z
-  .object({
-    token: z.string().min(20).max(200),
-    password: z
-      .string()
-      .min(12, 'Use at least 12 characters. A short phrase works well.')
-      .max(1024),
-    confirm: z.string(),
-  })
-  .refine((v) => v.password === v.confirm, {
-    path: ['confirm'],
-    message: 'Those do not match.',
-  });
-
-/**
- * Claim a new account with a setup token.
+ * A bypass, and it exists because its absence is not a stronger system: a clinician locked
+ * out mid-clinic is an urgent operational problem, and the resolution to an urgent problem
+ * with no procedure is somebody turning the feature off for the whole practice. Loud,
+ * audited and administrator-only beats that.
  *
- * Rate limited per IP like the login form, because this endpoint accepts a bearer token
- * and would otherwise be brute-forceable. The token is 256 bits, so guessing is not a
- * realistic attack — but the limiter costs nothing and closes the enumeration angle.
+ * `staff.update` is checked in the data layer, which also ends that account's live sessions
+ * — leaving sessions established with the factor still running would be trusting the very
+ * device now in doubt. It sets no new factor: the person enrolls again from their own
+ * settings, so an administrator never handles anybody's secret.
  */
-export async function claimAccountAction(
+export async function resetStaffMfaAction(
   _previous: StaffFormState,
   formData: FormData,
 ): Promise<StaffFormState> {
-  const parsed = claimInput.safeParse(formFields(formData));
-  if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
+  const userId = z.uuid().safeParse(formData.get('userId'));
+  if (!userId.success) return { message: 'Invalid account reference.' };
 
-  const { ip: rawIp } = await requestMeta();
-  const ip = safeInet(rawIp);
+  try {
+    const result = await resetStaffMfa(userId.data);
+    if (!result.ok) return { message: explain(result.reason) };
 
-  const verdict = await checkIpRateLimit(ip);
-  if (!verdict.allowed) {
+    revalidatePath('/staff');
     return {
-      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
-    };
-  }
-
-  const result = await redeemSetupToken(parsed.data.token, parsed.data.password, ip);
-
-  if (!result.ok) {
-    await recordAttempt({ email: 'setup-token', ip, succeeded: false });
-    // One message for wrong, used, revoked, and expired — see the data layer.
-    return {
+      ok: true,
       message:
-        'That setup link is not valid. It may have expired or already been used. Ask an administrator for a new one.',
+        'Two-step sign-in removed and their sessions ended. Ask them to set it up again.',
     };
+  } catch (error) {
+    const authz = authzMessage(error);
+    if (authz) return authz;
+    throw error;
   }
-
-  await recordAttempt({ email: result.email, ip, succeeded: true });
-  return { ok: true, message: 'Password set. You can now sign in.' };
 }

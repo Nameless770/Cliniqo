@@ -237,8 +237,21 @@ async function auditedOperation<T>(
         ...(metadataFrom ? metadataFrom(result) : {}),
       };
 
+      /*
+       * An empty resolution means "no subject", not an empty uuid.
+       *
+       * Every `subjectFrom` in this codebase ends `?? ''`, because the row it reads from
+       * may be null — a chart, invoice or conversation that does not exist, or an
+       * operation that refused before it found one. That empty string used to reach
+       * PostgreSQL as a `uuid` parameter, where it raises `invalid input syntax for type
+       * uuid` — turning a clean "not found" into a 500 AND losing the audit row for the
+       * attempt, which is the one thing this layer exists to guarantee.
+       *
+       * Normalising here rather than at each call site: there are three of them today and
+       * the next one will be written the same way.
+       */
       const resolvedSubject = subjectFrom
-        ? subjectFrom(result)
+        ? subjectFrom(result) || null
         : (spec.subjectPatientId ?? null);
 
       await writeAuditEvent(tx, {

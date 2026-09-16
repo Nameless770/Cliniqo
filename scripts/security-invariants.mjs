@@ -592,9 +592,15 @@ for (const file of readdirSync(actionDir).filter((f) => f.endsWith('.ts'))) {
   const src = read(`${actionDir}/${file}`);
   const exported = (src.match(/^export async function/gm) ?? []).length;
   const parsed = (src.match(/safeParse/g) ?? []).length;
-  // logout and submitNoteAction take no validatable input / delegate.
-  // logout / submitNoteAction / portal logout take no validatable input, or delegate.
-  const exempt = { 'auth.ts': 1, 'notes.ts': 1, 'portal.ts': 1 }[file] ?? 0;
+  /*
+   * Actions with no input to validate. Named individually, because this map is the one
+   * place a genuinely missing zod schema could hide behind a number:
+   *   auth.ts        logout()
+   *   notes.ts       submitNoteAction() — delegates
+   *   portal.ts      portal logout()
+   *   mfa.ts         beginEnrollmentAction() — takes no arguments at all
+   */
+  const exempt = { 'auth.ts': 1, 'notes.ts': 1, 'portal.ts': 1, 'mfa.ts': 1 }[file] ?? 0;
   check(
     'Validation',
     `${file}: every input-taking action validates`,
@@ -1431,6 +1437,349 @@ void randomUUID;
     'the access-request badge checks staff.read before counting',
     badge.indexOf("can(permissions, 'staff.read')") !== -1 &&
       badge.indexOf("can(permissions, 'staff.read')") < badge.indexOf('getDb()'),
+  );
+}
+
+/* ------------------------------------------- Request correlation (F12) */
+
+/*
+ * `audit_event.request_id` sat in the schema unpopulated for several phases, which is the
+ * failure mode this block guards: a column that exists, reads as a feature, and is null in
+ * every row. The three properties below are what make it evidence rather than decoration.
+ */
+{
+  const logCode = stripComments(read('src/server/audit/log.ts'));
+
+  check(
+    'Request correlation (F12)',
+    'middleware issues a request id per request',
+    middlewareCode.includes('const requestId = crypto.randomUUID()') &&
+      middlewareCode.includes("headers.set('x-request-id', requestId)"),
+  );
+
+  /*
+   * The id is written into an append-only legal record. Honouring an inbound header would
+   * let a caller stitch their reads onto someone else's id, or issue a fresh one per
+   * request to defeat the grouping entirely.
+   */
+  check(
+    'Request correlation (F12)',
+    'the id is generated, never read from the inbound request',
+    !middlewareCode.includes("get('x-request-id')"),
+  );
+
+  /*
+   * Resolved inside the writer, not passed by callers. Twenty-six call sites across eleven
+   * modules; one that forgets is one whose rows cannot be grouped, and nothing about the
+   * row would look wrong.
+   */
+  check(
+    'Request correlation (F12)',
+    'every audit row resolves the id centrally, so no call site can forget',
+    logCode.includes('requestId: input.requestId ?? (await currentRequestId())'),
+  );
+
+  check(
+    'Request correlation (F12)',
+    'a missing or malformed id yields null rather than failing the audit write',
+    logCode.includes('REQUEST_ID_SHAPE.test(value)') &&
+      /catch\s*{\s*return null;\s*}/.test(logCode),
+  );
+}
+
+/* ------------------------------------------ Action trust levels (F16) */
+
+/*
+ * An unauthenticated action sitting among administrator-only ones is how the next action
+ * gets written by copying a neighbour and inheriting a check that does not apply to it.
+ * Each action still authorizes itself; this keeps the MODULE readable as one trust level.
+ */
+{
+  const staffActions = stripComments(read('src/server/actions/staff.ts'));
+
+  check(
+    'Action trust levels (F16)',
+    'the unauthenticated claim action does not live among the admin-only ones',
+    !staffActions.includes('claimAccountAction') &&
+      existsSync('src/server/actions/account-claim.ts'),
+  );
+
+  check(
+    'Action trust levels (F16)',
+    'the claim action still rate-limits and still validates',
+    (() => {
+      const claim = stripComments(read('src/server/actions/account-claim.ts'));
+      return (
+        claim.includes('checkIpRateLimit(ip)') &&
+        claim.includes('claimInput.safeParse(formFields(formData))')
+      );
+    })(),
+  );
+
+  /*
+   * The admin response type carries `setupToken`, which the claim flow must never return.
+   * Separate types mean that is a compile error rather than a code-review catch.
+   */
+  check(
+    'Action trust levels (F16)',
+    'the claim response type cannot carry an admin-only setup token',
+    !stripComments(read('src/server/actions/account-claim.ts')).includes('setupToken'),
+  );
+}
+
+/* ------------------------------------------------ Patient merge (safety) */
+
+/*
+ * A merge moves clinical rows between records. Done wrong it combines two people's charts,
+ * which is a breach; left undone, an allergy on one chart stays invisible on the other.
+ * Both failure modes are silent, so the properties that prevent them are asserted here.
+ */
+{
+  const merge = stripComments(read('src/server/data-access/patient-merge.ts'));
+  const mergeMigration = read('drizzle/0023_patient_merge.sql');
+
+  check(
+    'Patient merge',
+    'only admin may merge — not the front desk, not a clinician',
+    permissionsForRoles(['admin']).has('patient.merge') &&
+      !permissionsForRoles(['receptionist']).has('patient.merge') &&
+      !permissionsForRoles(['doctor']).has('patient.merge'),
+  );
+
+  /*
+   * The audit trail of a folded-away chart is what a §164.528 accounting for the old MRN
+   * reads. Moving those rows would erase the answer — and the app role holds no UPDATE on
+   * audit_event anyway, so a line that tried would fail at runtime instead of review.
+   */
+  check(
+    'Patient merge',
+    'audit rows and break-glass grants are never moved by a merge',
+    !/key:\s*'audit_event'/.test(merge) && !/key:\s*'break_glass_grant'/.test(merge),
+  );
+
+  /*
+   * Ordering, learned the hard way: the no-chains trigger fires BEFORE INSERT and reads
+   * `patient.merged_into_patient_id`. Setting the pointer first means the transaction's
+   * own update is what the trigger sees, and EVERY merge is refused as a chain. The whole
+   * feature was inert until this order was corrected.
+   */
+  check(
+    'Patient merge',
+    'the merge record is inserted before the pointer is set',
+    merge.indexOf('.insert(patientMerge)') > 0 &&
+      merge.indexOf('.insert(patientMerge)') <
+        merge.indexOf('mergedIntoPatientId: survivingPatientId'),
+  );
+
+  /* Chains are refused in the database, not only in the code that calls it. */
+  check(
+    'Patient merge',
+    'no merge chains, enforced by a trigger',
+    mergeMigration.includes('cliniqo_patient_merge_no_chains') &&
+      mergeMigration.includes('BEFORE INSERT ON "patient_merge"'),
+  );
+
+  /*
+   * Reversal moves back exactly what the manifest names. "Move back everything on the
+   * survivor" would hand one person the other's rows — the failure this feature corrects,
+   * performed in reverse.
+   */
+  check(
+    'Patient merge',
+    'reversal restores only the rows the manifest names',
+    merge.includes('inArray(table.id, ids)'),
+  );
+
+  /* Both charts get an audit row, so neither accounting ends without an explanation. */
+  check(
+    'Patient merge',
+    'the merge is audited against both charts',
+    (merge.match(/action: 'patient\.merge'/g) ?? []).length >= 2,
+  );
+
+  /* A bearer credential must never be silently retargeted at a different chart. */
+  check(
+    'Patient merge',
+    'outstanding portal invitations are revoked, never moved',
+    merge.includes('patient_setup_token_revoked') &&
+      !/patientSetupToken[\s\S]{0,200}set\(\{\s*patientId/.test(merge),
+  );
+}
+
+/* --------------------------------------- Audited subject normalisation */
+
+/*
+ * Every `subjectFrom` in the data-access layer ends `?? ''`, because the row it reads may
+ * be null. That empty string reaching PostgreSQL as a uuid raises `invalid input syntax`,
+ * which turns a clean "not found" into a 500 AND loses the audit row for the attempt.
+ * Normalised centrally; asserted here because the next `?? ''` will be written the same way.
+ */
+check(
+  'Audit',
+  'an unresolved audit subject becomes null, never an empty uuid',
+  /subjectFrom\(result\)\s*\|\|\s*null/.test(stripComments(audited)),
+);
+
+/* ------------------------------------------ Activity review (F17) */
+
+/*
+ * 164.308(a)(1)(ii)(D) asks for the review; 164.316(b)(1) asks for it documented. The
+ * failure mode is a review feature that exists and proves nothing: counts the reviewer
+ * chose, or a record they can edit afterwards.
+ */
+{
+  const review = stripComments(read('src/server/data-access/compliance-review.ts'));
+  const reviewAction = stripComments(read('src/server/actions/compliance-review.ts'));
+  const reviewMigration = read('drizzle/0024_audit_review.sql');
+
+  check(
+    'Activity review (F17)',
+    'only admin may file a review',
+    permissionsForRoles(['admin']).has('audit.review') &&
+      !permissionsForRoles(['doctor']).has('audit.review') &&
+      !permissionsForRoles(['receptionist']).has('audit.review'),
+  );
+
+  /*
+   * THE security property. If the counts came from the form, whoever files the review
+   * could report "nothing flagged" over a week that flagged fifty things — and that row
+   * is the artifact an auditor is shown. `recordReview` takes no findings argument at all.
+   */
+  check(
+    'Activity review (F17)',
+    'the reviewer cannot supply the findings — the server recomputes them',
+    /export async function recordReview\(\s*periodStart: Date,\s*periodEnd: Date,\s*notes: string,\s*\)/.test(
+      review,
+    ) &&
+      review.includes('const digest = await buildReviewDigest(periodStart, periodEnd)') &&
+      !reviewAction.includes('findings'),
+  );
+
+  /* An attestation that can be edited afterwards is not evidence of anything. */
+  check(
+    'Activity review (F17)',
+    'a filed review cannot be edited or deleted by the application',
+    /REVOKE UPDATE, DELETE, TRUNCATE ON "audit_review" FROM cliniqo_app/.test(
+      reviewMigration,
+    ),
+  );
+
+  /* A tick box is what this finding exists to avoid. */
+  check(
+    'Activity review (F17)',
+    'a review must carry a written conclusion',
+    /notes:[\s\S]{0,120}\.min\((\d+)/.test(reviewAction) &&
+      Number(/notes:[\s\S]{0,120}\.min\((\d+)/.exec(reviewAction)?.[1] ?? 0) >= 10,
+  );
+
+  /* Reading the digest names patients, so it is a read of the log and audited as one. */
+  check(
+    'Activity review (F17)',
+    'building the digest is gated on audit.read and audited',
+    review.includes("permission: 'audit.read'") &&
+      review.includes("action: 'audit.read'"),
+  );
+
+  /* The signal no permission check can produce, because every such read is authorized. */
+  check(
+    'Activity review (F17)',
+    'the digest surfaces same-surname access',
+    review.includes('sameSurname') && review.includes('string_to_array'),
+  );
+}
+
+/* ------------------------------------------------- Second factor (TOTP) */
+
+/*
+ * Every other control in this system is written in terms of an authenticated actor, so a
+ * stolen password is not one compromised control but all of them. These are the properties
+ * that make the second factor worth having rather than worth bypassing.
+ */
+{
+  const totp = stripComments(read('src/server/auth/totp.ts'));
+  const mfa = stripComments(read('src/server/auth/mfa.ts'));
+  const authAction = stripComments(read('src/server/actions/auth.ts'));
+  const mfaAction = stripComments(read('src/server/actions/mfa.ts'));
+
+  /*
+   * THE bypass to prevent. If the password step created a session flagged "pending", every
+   * getSession() in the codebase would become responsible for remembering the flag, and the
+   * one that forgot would be a silent, complete bypass that reads like ordinary code.
+   */
+  check(
+    'Second factor',
+    'the password step creates no session when a factor is enrolled',
+    /if \(await requiresSecondFactor\(account\.id\)\) \{[\s\S]{0,800}?redirect\('\/login\/verify'\)/.test(
+      authAction,
+    ) &&
+      authAction.indexOf('requiresSecondFactor') <
+        authAction.indexOf('createSession(tx, account.id'),
+  );
+
+  /* The session is created by the CHALLENGE, and the login is audited with it. */
+  check(
+    'Second factor',
+    'the session is created only once the code verifies',
+    mfaAction.includes('createSession(tx, pending.userId') &&
+      mfaAction.indexOf('verifyChallenge(') < mfaAction.indexOf('createSession('),
+  );
+
+  /* A code valid for its whole window is replayable by anyone who watches it typed. */
+  check(
+    'Second factor',
+    'a spent time-step cannot be used again',
+    /if \(lastUsedStep !== null && step <= lastUsedStep\) continue;/.test(totp) &&
+      mfa.includes('lastUsedStep: verdict.step'),
+  );
+
+  /* A secret in a database dump is a permanent second factor for everyone in it. */
+  check(
+    'Second factor',
+    'the secret is encrypted at rest, with an authenticated cipher',
+    totp.includes("createCipheriv('aes-256-gcm'") &&
+      totp.includes('cipher.getAuthTag()') &&
+      mfa.includes('sealSecret(secret, env.SESSION_SECRET)'),
+  );
+
+  /* Enabling on a button press locks people out with a mistyped secret or a wrong clock. */
+  check(
+    'Second factor',
+    'enrollment is only switched on once a working code proves it',
+    mfa.includes('confirmedAt: new Date()') &&
+      /verifyCode\([\s\S]{0,120}?\)[\s\S]{0,200}?if \(!verdict\.ok\)/.test(mfa),
+  );
+
+  /* Recovery codes are compared, never read back — so there is nothing to gain from
+     reversibility and a great deal to lose. */
+  check(
+    'Second factor',
+    'recovery codes are hashed and single-use',
+    totp.includes('hashRecoveryCode') &&
+      !totp.includes('sealRecoveryCode') &&
+      /isNull\(userRecoveryCode\.usedAt\)/.test(mfa),
+  );
+
+  /* Brute-forcing six digits is a million guesses: minutes with a botnet, unthrottled. */
+  check(
+    'Second factor',
+    'the challenge is rate limited',
+    mfaAction.includes('checkIpRateLimit(ip)'),
+  );
+
+  /* Who removed a factor, and whether it was their own, is the first thing an
+     investigation asks after a compromise. */
+  check(
+    'Second factor',
+    'removal records whether it was the account itself or an administrator',
+    mfa.includes('bySelf: actorUserId === userId'),
+  );
+
+  /* An unattended signed-in screen is exactly what this protects against, so removing it
+     from a live session must cost something. */
+  check(
+    'Second factor',
+    'turning your own factor off re-checks the password',
+    mfaAction.includes('verifyPassword(parsed.data.password'),
   );
 }
 

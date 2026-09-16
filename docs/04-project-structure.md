@@ -29,11 +29,13 @@ cliniqo/
 │  │  └─ schema/                one module per domain + shared enums/types
 │  │
 │  ├─ server/                   ── SERVER ONLY ──
-│  │  ├─ auth/                  passwords, sessions, rate limiting     (phase 2)
-│  │  ├─ data-access/           the ONLY code allowed to read patient tables (phase 2)
-│  │  ├─ audit/                 audit writer used by data-access       (phase 2)
-│  │  ├─ services/              business logic                          (phase 3+)
-│  │  └─ actions/               'use server' entry points               (phase 2+)
+│  │  ├─ auth/                  passwords, sessions, rate limiting, OAuth
+│  │  ├─ data-access/           the ONLY code allowed to read patient tables
+│  │  ├─ audit/                 audit writer used by data-access
+│  │  ├─ portal/               the patient-facing half: its own sessions and reads
+│  │  ├─ triage/                symptom assessment; red flags, then an engine
+│  │  ├─ maintenance/           scheduled jobs, run by scripts/maintenance.js
+│  │  └─ actions/               'use server' entry points
 │  │
 │  ├─ env/
 │  │  ├─ server.ts              ── SERVER ONLY ── validated secrets
@@ -43,6 +45,7 @@ cliniqo/
 │  │  └─ ui/                    generic primitives, no domain knowledge
 │  │
 │  ├─ lib/                      ── MAY REACH THE BROWSER ── pure isomorphic helpers
+│  ├─ middleware.ts             CSP nonce + request id. NOT an auth boundary.
 │  └─ instrumentation.ts        runs once at server start → env validation
 │
 ├─ docker-compose.yml           local Postgres only
@@ -98,16 +101,22 @@ prop type, and it is the one part of the boundary that only code review catches.
 Server Component  /  Server Action  ('use server')
         │
         ▼
-    services/          business logic, no raw SQL
-        │
-        ▼
    data-access/        authorize → read → write audit row, one transaction
         │
         ▼
     db/client          Drizzle
 ```
 
-`actions/` never queries the database directly. `services/` never bypasses `data-access/`.
+`actions/` never queries the database directly.
+
+**There is no `services/` layer, and its absence is deliberate.** Early phases planned one
+between actions and data-access. It was removed once it existed, because every function in
+it was a pass-through: the authorization, the transaction and the audit row all live in
+`data-access/` by design, so a middle layer with nothing of its own to do was one more file
+to open when reading a feature, and one more place a future query could be written that
+bypassed the layer below. Business logic that is genuinely not a query — triage
+assessment, scheduling arithmetic — lives in its own module under `src/server/` or
+`src/lib/` and is called by the data-access function that needs it.
 
 `data-access/` is the load-bearing layer: every function takes an **actor**, a **target**,
 and a **purpose**; it checks authorization, performs the read, and writes the audit row in
@@ -122,9 +131,12 @@ call it with any arguments. So, in this order:
 1. Resolve the session; reject if absent.
 2. Re-check authorization **in the action itself**. The `(staff)` layout guard is UX and
    defence in depth, never the access-control boundary — CLAUDE.md rule 2.
-3. Validate every input with a zod schema.
-4. Delegate to a service. No inline SQL.
+3. Validate every input with a zod schema, through `formFields()` rather than raw FormData.
+4. Delegate to `data-access/`. No inline SQL.
 5. Return a narrow projection.
+
+One trust level per module. An unauthenticated action does not share a file with
+authenticated ones — see `actions/account-claim.ts`, split out for exactly that reason.
 
 ---
 

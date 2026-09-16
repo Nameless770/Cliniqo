@@ -1,4 +1,7 @@
-# Cliniqo — Security Review (Phase 9)
+# Cliniqo — Security Review
+
+**Written at Phase 9. Re-checked 2026-09-15 — see "Where this stands now" before acting on
+anything below.**
 
 Audit only. No code changed.
 
@@ -13,16 +16,102 @@ that distinction is marked throughout, because several areas could **not** be re
 
 ---
 
-## Summary
+## Summary (as written, Phase 9)
 
-| Severity | Count | Theme |
-| -------- | ----- | ----- |
-| High | 5 | Bulk-read exposure, CSP, and the entire infrastructure layer (encryption at rest, backups, BAAs) |
-| Medium | 10 | Missing patient-rights features, unwired break-glass, one validation gap, dead code |
-| Low | 6 | Hygiene, process, and accepted risks |
+| Severity | Count | Theme                                                                                            |
+| -------- | ----- | ------------------------------------------------------------------------------------------------ |
+| High     | 5     | Bulk-read exposure, CSP, and the entire infrastructure layer (encryption at rest, backups, BAAs) |
+| Medium   | 10    | Missing patient-rights features, unwired break-glass, one validation gap, dead code              |
+| Low      | 6     | Hygiene, process, and accepted risks                                                             |
 
 **The single most important finding is F1.** Everything else is either infrastructure not
 yet built, or a bounded defect.
+
+---
+
+## Where this stands now (2026-09-15)
+
+Fourteen of the twenty-one findings are closed and one is partly closed; two were accepted
+at the time and remain accepted. The original findings are kept below in full,
+because the reasoning is why the current shape of the code is what it is — but **this table
+is the current state**, and the text below it is history.
+
+Re-checked by reading the code as it stands, not by trusting this document.
+
+| #   | Phase 9 finding                              | Now                        | Where                                                                                                                                                                                                 |
+| --- | -------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | No throttle on authenticated PHI reads       | **Closed**                 | `data-access/read-budget.ts`, enforced for every counted read in `audited.ts`; fails open on a count error, fails closed on the break-glass check; `bulkReaders()` feeds the dashboard                |
+| F2  | CSP allows `'unsafe-inline'`                 | **Closed**                 | per-request nonce + `strict-dynamic` in `middleware.ts`; CI greps the built bundle to prove `'unsafe-eval'` is development-only                                                                       |
+| F3  | Encryption at rest unconfigured              | **Open — infrastructure**  | nothing in the repository addresses it; still a go-live blocker                                                                                                                                       |
+| F4  | No backups, no tested restore                | **Open — infrastructure**  | as above                                                                                                                                                                                              |
+| F5  | No BAA inventory, hosting undecided          | **Open — decision**        | the discipline held: still no email, SMS, analytics or error-tracking dependency, and the one third-party engine is gated behind an explicit BAA acknowledgement                                      |
+| F6  | `unarchivePatientAction` unvalidated         | **Closed**                 | validates like every sibling                                                                                                                                                                          |
+| F7  | Dead duplicate audit reader                  | **Closed**                 | file deleted                                                                                                                                                                                          |
+| F8  | No record export (§164.524)                  | **Closed**                 | `patients/[id]/export`                                                                                                                                                                                |
+| F9  | No accounting of disclosures (§164.528)      | **Closed**                 | `patients/[id]/disclosures`, over `data-access/disclosures.ts`                                                                                                                                        |
+| F10 | No retention policy or partition maintenance | **Partly closed**          | `server/maintenance/` + `scripts/maintenance.js` run on a schedule and are tested; the per-state retention period is still undetermined, so nothing is purged yet — which remains the correct default |
+| F11 | Break-glass modelled but not wired           | **Closed**                 | request and review flow, and an active grant lifts the F1 ceiling                                                                                                                                     |
+| F12 | No error boundary, no request correlation    | **Closed**                 | `(staff)/error.tsx`; `request_id` is now issued by middleware and stamped on every audit row by `writeAuditEvent` itself                                                                              |
+| F13 | Patient ids in URLs                          | **Accepted**               | unchanged, and still the right call                                                                                                                                                                   |
+| F14 | `booking_note` is a standing PHI leak        | **Accepted — operational** | unchanged; wants audit-review sampling, not schema                                                                                                                                                    |
+| F15 | Phases 7–8 never verified against a database | **Closed as a process**    | CI now applies every migration to a clean PostgreSQL 17 and runs the database and end-to-end suites on every pull request                                                                             |
+| F16 | `actions/staff.ts` mixes trust levels        | **Closed**                 | the unauthenticated claim action moved to `actions/account-claim.ts`, with its own response type that cannot carry a setup token                                                                      |
+| F17 | Admin clinical reads need a review _process_ | **Closed**                 | `/audit/review` surfaces the patterns worth a look and records that somebody looked; a filed review cannot be edited by the application                                                               |
+| F18 | No way to revoke another user's sessions     | **Closed**                 | `revokeAllSessionsForUser(..., 'admin_revoke')`, independent of deactivation                                                                                                                          |
+| F19 | No breached-password check                   | **Open — decision**        | still an external call from a PHI system; deferred deliberately                                                                                                                                       |
+| F20 | Dependency scanning not a CI gate            | **Closed**                 | `check:deps` runs in CI; production dependencies currently report zero advisories                                                                                                                     |
+| F21 | No automated security regression tests       | **Closed, and then some**  | 169 static invariants plus a database and end-to-end suite, both gated in CI, with a check that the suite cannot silently shrink                                                                      |
+
+### What is actually left
+
+1. **F3, F4, F5 — the infrastructure block.** Unchanged since Phase 9 and still what gates
+   go-live. There is no infrastructure-as-code in the repository at all, so there is
+   nothing to review yet rather than something reviewed and found wanting.
+2. **F19** — a decision, not a defect: a breached-password check is still an external call
+   from a PHI system and needs a ruling rather than a patch.
+3. **F10's retention period** — blocked on state law, as it has been since M11.
+
+Nothing else outside the infrastructure block is open. F17 closed with the activity review;
+what remains of it is not code but cadence — somebody has to open `/audit/review` weekly,
+and the review history is what shows whether they did.
+
+---
+
+## Second pass — 2026-09-15
+
+The four phases built after this review (self-registration, Google sign-in for staff and
+patients, symptom triage, and the patient portal) had never been reviewed here. They were
+read this session. **No new defect was found**, which is worth recording as a result rather
+than an absence: each of the properties below was checked against the code, not assumed.
+
+- **The third-party triage engine sends no identifier.** No name, MRN, date of birth,
+  patient id or conversation id reaches the vendor — symptom text only. It is still a
+  disclosure of PHI, which is why it is off by default and refuses to start without an
+  acknowledged BAA.
+- **The emergency check cannot be overridden by a model.** It runs first, deterministically,
+  on the patient's raw words, and returns without consulting any engine.
+- **The two Google flows cannot cross.** Different redirect URI, cookie, callback route and
+  session table, with PKCE (S256), a constant-time `state` comparison, and a `nonce` bound
+  per request. Neither callback creates an account.
+- **Self-registered staff accounts hold no roles**, so every action refuses them until an
+  administrator grants one.
+- **The client boundary held through the newest UI.** The clinical client components take
+  named view types (`AllergyView`, `FlagView`, one note version), never a record.
+
+### N1 — The documentation has fallen behind the code
+
+The only finding from this pass, and it is about this directory rather than the application.
+
+`docs/02-data-model.md` documents the Phase 1 entities and does not mention
+`user_identity`, `patient_account`, `patient_identity`, the triage tables, billing, or the
+pending-signup token. `docs/04-project-structure.md` describes a `src/server/services/`
+layer that no longer exists — actions call the data-access layer directly now. This
+document, until today, reported eleven closed findings as open.
+
+For most projects that is untidiness. Here the documentation is part of the control: the
+argument that this system is safe to hold PHI is made in these files, and an auditor asking
+"show me your data model" is owed the one that is running. Treat a doc update as part of
+the work that changed the behaviour, the way the migration already is.
 
 ---
 
@@ -43,7 +132,7 @@ A signed-in account — stolen credentials, or a departing employee — can call
 `searchPatients` or `getPatient` in a loop and read the entire patient roster at machine
 speed. Nothing throttles it, and nothing alerts on it.
 
-Every read *is* audited, so the breach is reconstructable after the fact. That satisfies
+Every read _is_ audited, so the breach is reconstructable after the fact. That satisfies
 §164.312(b) but not the point: the audit log tells you the scale of the breach you must
 notify within 60 days. It does not stop it.
 
@@ -122,7 +211,7 @@ function grows.
 `src/server/services/audit-read.ts` is unreferenced (verified: zero importers). It is the
 Phase 3 implementation, superseded by `data-access/admin.ts`.
 
-It matters because it is a *divergent* second path: it queries `audit_event` directly and
+It matters because it is a _divergent_ second path: it queries `audit_event` directly and
 carries a flag literally named `AUDIT_READ_IS_NOT_YET_SELF_LOGGED`. If a future developer
 finds and wires it, audit reads stop being audited — silently, and in exactly the module
 where that is least acceptable. Delete it.
@@ -147,7 +236,7 @@ Three linked gaps:
 - `cliniqo_create_audit_partition` exists but nothing calls it on a schedule. When the
   seeded 26-month window lapses, writes land in `audit_event_default`, which is a safety
   net that should always be empty. Nothing alerts on it.
-- A patient who has ever been *accessed* cannot be hard-deleted — the FK from
+- A patient who has ever been _accessed_ cannot be hard-deleted — the FK from
   `audit_event.subject_patient_id` blocks it (discovered empirically in Phase 4). Correct
   as a no-hard-delete guarantee, but it means a lawful purge has no path today.
 
@@ -194,7 +283,7 @@ Migrations **0009–0012 are unapplied**. Docker Desktop failed to start across 
 sessions, so prescriptions, staff management, the setup-token flow, the filtered audit
 viewer, and the dashboard have been verified statically and by build only.
 
-Everything through Phase 6 *was* verified live, including the exclusion constraint under
+Everything through Phase 6 _was_ verified live, including the exclusion constraint under
 20-way concurrency, audit immutability, the receptionist field boundary at the SQL level,
 and note version freezing. The later work has no equivalent evidence.
 
@@ -207,31 +296,37 @@ kind of statement that behaves differently against a populated database.
 ## LOW
 
 ### F16 — `actions/staff.ts` mixes trust levels
+
 Admin-only actions and the unauthenticated `claimAccountAction` share a file. Each checks
 independently, so it is not a vulnerability — but a file mixing trust levels invites a
 copy-paste that assumes the wrong one. Split before it grows.
 
-### F17 — Administrator clinical read access needs a review *process*
+### F17 — Administrator clinical read access needs a review _process_
+
 Admin holds `patient.read.clinical` and `note.read` by design, audited. The control that
 makes that acceptable is somebody actually reviewing those reads
 (§164.308(a)(1)(ii)(D)). The viewer exists; the review cadence does not.
 
 ### F18 — No way to revoke another user's sessions without deactivating them
+
 `revokeAllSessionsForUser` exists and is called on role change and deactivation. There is
 no "sign this person out everywhere" control for a lost laptop.
 
 ### F19 — Password policy has no breach-list check
+
 12-character minimum, no composition rules (correct — length beats composition). No check
 against known-breached passwords. HIBP's k-anonymity API would not transmit the password,
 but it is still an external call from a PHI system and needs a decision.
 
 ### F20 — Dependency scanning is not a CI gate
+
 `npm audit` currently reports 4 moderate advisories, all in drizzle-kit's dev-only
 `@esbuild-kit → esbuild` chain — accepted and documented, never in a runtime image. But
-nothing fails the build on a *new* advisory, and the one advisory that mattered
+nothing fails the build on a _new_ advisory, and the one advisory that mattered
 (drizzle-orm SQL injection, GHSA-gpj5-g38j-94v9) was caught by hand in Phase 1.
 
 ### F21 — No automated security regression tests
+
 The strong invariants — receptionist sees no clinical SQL, audit is immutable, one booking
 wins a race — were verified by ad-hoc scripts that were deleted afterwards. They should be
 a test suite that runs in CI, or they will decay.
@@ -258,7 +353,7 @@ Confirmed this session or earlier, against real artifacts:
   in the query, permissions resolved fresh per request, tokens stored as SHA-256.
 - **Login timing is flat**: unknown email, unclaimed account, and wrong password all cost
   ~335 ms (measured); the decoy hash is warmed at startup.
-- **Audit log is immutable** — privilege revoke *and* trigger, blocking the schema owner
+- **Audit log is immutable** — privilege revoke _and_ trigger, blocking the schema owner
   too (measured).
 - **No `console.log` anywhere**; the five `console.error/info` calls log messages and IDs,
   never record content. ESLint enforces this.

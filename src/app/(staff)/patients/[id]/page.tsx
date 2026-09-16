@@ -11,12 +11,14 @@ import { guardPage } from '@/server/auth/authorize';
 import { getPatientAppointments } from '@/server/data-access/appointments';
 import { listAllergies, listFlags } from '@/server/data-access/clinical-facts';
 import { getPatientNotes } from '@/server/data-access/notes';
+import { getMergeProvenance } from '@/server/data-access/patient-merge';
 import { getPatient } from '@/server/data-access/patients';
 import { getPatientPrescriptions } from '@/server/data-access/prescriptions';
 
 import { BreakGlassButton } from './BreakGlassButton';
 import { ClinicalFacts } from './ClinicalFacts';
 import { ArchiveControls } from './ArchiveControls';
+import { MergeProvenance } from './MergeProvenance';
 import { IdentityCheck } from './IdentityCheck';
 import { InvitePatientButton } from './InvitePatientButton';
 import { PrescriptionActions } from './PrescriptionActions';
@@ -102,7 +104,7 @@ export default async function PatientProfilePage({
    * For a receptionist no SELECT against visit_note is ever issued, so note text cannot
    * reach this page's memory, its HTML, or a screenshot of it.
    */
-  const [view, appointments, notes, prescriptions, allAllergies, allFlags] =
+  const [view, appointments, notes, prescriptions, allAllergies, allFlags, provenance] =
     await Promise.all([
       getPatient(id),
       getPatientAppointments(id, 10),
@@ -113,6 +115,9 @@ export default async function PatientProfilePage({
       // can act on it. The chart's own banner uses the narrower active-only projection.
       mayEditClinical ? listAllergies(id) : Promise.resolve([]),
       mayEditClinical ? listFlags(id) : Promise.resolve([]),
+      /* Unconditional: a chart that has been merged away must announce it to EVERY role.
+         A clinician who cannot see this banner documents into an abandoned record. */
+      getMergeProvenance(id),
     ]);
 
   if (!view) notFound();
@@ -125,6 +130,7 @@ export default async function PatientProfilePage({
   const mayAudit = can(session.permissions, 'audit.read');
   const mayBreakGlass = can(session.permissions, 'breakglass.use');
   const mayArchive = can(session.permissions, 'patient.archive');
+  const mayMerge = can(session.permissions, 'patient.merge');
   const timeZone = session.clinicTimeZone;
 
   return (
@@ -249,8 +255,81 @@ export default async function PatientProfilePage({
               Who accessed this
             </Link>
           ) : null}
+
+          {/*
+            Merge is administrator-only and hidden on a chart that has itself been merged
+            away, which would only offer a chain the database refuses. Hiding it is
+            presentation: `patient.merge` is checked by the page it leads to and again
+            inside the merge itself.
+          */}
+          {mayMerge && !provenance.mergedInto ? (
+            <Link
+              href={`/patients/${id}/merge`}
+              style={{
+                padding: 'var(--space-2) var(--space-4)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-default)',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                textDecoration: 'none',
+                fontSize: 'var(--text-sm)',
+              }}
+            >
+              Merge duplicate
+            </Link>
+          ) : null}
         </div>
       </div>
+
+      {/*
+        THIS CHART HAS BEEN MERGED AWAY.
+        First thing on the page, shown to every role, and not conditional on any
+        permission. The danger is specific: a merged chart still renders as an ordinary,
+        nearly empty record, and a clinician who does not notice writes a note onto a
+        chart nobody reads — which is the same invisible-data failure the merge was
+        performed to fix.
+      */}
+      {provenance.mergedInto ? (
+        <div
+          role="alert"
+          style={{
+            display: 'grid',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--status-danger-bg)',
+            color: 'var(--status-danger-text)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          <span>
+            <strong>This chart was merged into another record.</strong> Everything on it
+            now lives on {provenance.mergedInto.name} ({provenance.mergedInto.mrn}). Do
+            not document here.
+          </span>
+          <span>
+            <Link href={`/patients/${provenance.mergedInto.patientId}`}>
+              Open the record that survives
+            </Link>
+          </span>
+        </div>
+      ) : null}
+
+      {/* What was folded into this one, and the way back out of a wrong merge. */}
+      <MergeProvenance
+        patientId={id}
+        mayUndo={mayMerge}
+        absorbed={provenance.absorbed.map((entry) => ({
+          mergeId: entry.mergeId,
+          patientId: entry.patientId,
+          mrn: entry.mrn,
+          name: entry.name,
+          reason: entry.reason,
+          /* Formatted here, in the clinic's zone: the client component must not be handed
+             a raw instant and left to render it in the browser's timezone. */
+          performedAt: formatDateInZone(entry.performedAt, timeZone),
+        }))}
+      />
 
       {mayBreakGlass ? <BreakGlassButton patientId={id} /> : null}
 

@@ -33,6 +33,12 @@ export const PERMISSIONS = [
   'patient.archive',
   /* Right of access, §164.524. A full-record export is a disclosure, not a read. */
   'patient.export',
+  /* Folding a duplicate chart into the one that survives.
+   *
+   * Its own permission, not part of `patient.update`: a merge moves clinical rows between
+   * records, and getting it wrong combines two different people's charts — which is a
+   * breach, not an edit. Admin only; see the matrix note below. */
+  'patient.merge',
 
   /* Scheduling. */
   'appointment.read',
@@ -76,6 +82,11 @@ export const PERMISSIONS = [
   'staff.update',
   'role.assign',
   'audit.read',
+  /* Recording that a window of system activity was reviewed (164.308(a)(1)(ii)(D)).
+   * Split from `audit.read` for the same reason `note.sign` is split from `note.create`:
+   * attesting to something is a different act from looking at it, and the attestation is
+   * the compliance artifact. */
+  'audit.review',
   'clinic.configure',
 
   /* Emergency access — §164.312(a)(2)(ii). Granted, but every use is logged loudly and
@@ -145,6 +156,18 @@ export const ROLE_PERMISSIONS: Record<RoleCode, readonly Permission[]> = {
     'patient.update',
     'patient.archive',
     'patient.export',
+    /*
+     * Merge is administrator-only, though the front desk is who usually SPOTS the
+     * duplicate — they register patients and see the same person twice at check-in.
+     *
+     * The split is deliberate. Reconciling two charts moves clinical rows, and a wrong
+     * merge combines two people's records; that is a records decision of the kind real
+     * practices give to health-information staff, and here `admin` is the records role.
+     * A receptionist can still surface a candidate — the duplicate warning at
+     * registration and the candidate list both read with `patient.read.identifying` —
+     * they simply cannot be the one to commit it.
+     */
+    'patient.merge',
     'appointment.read',
     'appointment.create',
     'appointment.update',
@@ -165,6 +188,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, readonly Permission[]> = {
     'staff.update',
     'role.assign',
     'audit.read',
+    'audit.review',
     'clinic.configure',
   ],
 };

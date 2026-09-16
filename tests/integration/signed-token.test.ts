@@ -44,7 +44,23 @@ describe('signed sign-up tokens', () => {
 
   it('refuses a token with an altered signature', () => {
     const token = mint();
-    const flipped = token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A');
+    const [body, signature] = token.split('.') as [string, string];
+
+    /*
+     * Flip a bit in the signature BYTES. Substituting the last base64url character does
+     * not reliably change them: 32 bytes encode to 43 characters, and the last one holds
+     * only four significant bits, so an encoder emits one of just sixteen characters
+     * there. When that character was 'A' the old 'A'-to-'B' swap left the decoded bytes
+     * identical — verifyToken compares bytes with timingSafeEqual — and this test failed
+     * on a correct answer once every sixteen runs. Measured at 6.2% over 50,000 tokens.
+     *
+     * `expect(flipped).not.toBe(token)` did not catch it: the STRING differed, which is
+     * exactly what made the bug survive review.
+     */
+    const tampered = Buffer.from(signature, 'base64url');
+    tampered[0] = tampered[0]! ^ 0x01;
+    const flipped = `${body}.${tampered.toString('base64url')}`;
+
     expect(flipped).not.toBe(token);
     expect(verifyToken(flipped, SECRET, PURPOSE, NOW)).toBeNull();
   });

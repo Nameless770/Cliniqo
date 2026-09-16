@@ -13,6 +13,7 @@
 
 import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   inet,
   jsonb,
@@ -191,5 +192,71 @@ export const auditEvent = pgTable(
     index('audit_event_denied_idx')
       .on(t.occurredAt.desc())
       .where(sql`${t.outcome} = 'denied'`),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A completed review of system activity — §164.308(a)(1)(ii)(D).
+ *
+ * ==========================================================================
+ * THE MISSING HALF WAS NEVER THE VIEWER
+ * ==========================================================================
+ *
+ * Security review finding F17, and M13 before it: an administrator holds
+ * `patient.read.clinical` by design, so the control that makes that acceptable is
+ * somebody actually reading the log. The filterable viewer has existed since phase 7.
+ * What did not exist was any evidence that a review ever happened — and a safeguard whose
+ * operation leaves no trace is one the clinic cannot demonstrate on the day it is asked to.
+ * §164.316(b)(1) wants the activity documented, not merely performed.
+ *
+ * So this table is the artifact, not the analysis. One row means a named person looked at
+ * a named window and wrote down what they concluded.
+ *
+ * ==========================================================================
+ * WHY THE COUNTS ARE FROZEN INTO THE ROW
+ * ==========================================================================
+ *
+ * `findings` snapshots what was flagged at the moment of review. The audit log keeps
+ * growing and the same query re-run next year returns something else, so a review record
+ * that only named a period would be unfalsifiable — it could not show what was in front of
+ * the reviewer. COUNTS ONLY: no patient identifiers, no names. The detail stays in
+ * `audit_event`, which is where it is already protected.
+ *
+ * Not unique per period, on purpose. A second reviewer covering the same window is a
+ * stronger control, not a conflict; "has this period been reviewed" is `EXISTS`.
+ */
+export const auditReview = pgTable(
+  'audit_review',
+  {
+    id: primaryId(),
+    clinicId: uuid('clinic_id')
+      .notNull()
+      .references(() => clinic.id),
+
+    /** The window reviewed, half-open: [start, end). */
+    periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+    periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+
+    reviewedBy: uuid('reviewed_by')
+      .notNull()
+      .references(() => userAccount.id),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * What the reviewer concluded. Required — a review that records no conclusion is a
+     * checkbox, and a checkbox is what this finding exists to avoid.
+     */
+    notes: text('notes').notNull(),
+
+    /** Counts per flagged category, as seen at review time. Never identifiers. */
+    findings: jsonb('findings').$type<Record<string, number>>().notNull(),
+  },
+  (t) => [
+    /** "When was this clinic last reviewed", and the review history, in one index. */
+    index('audit_review_clinic_period_idx').on(t.clinicId, t.periodStart.desc()),
+    /** A period cannot end before it starts. */
+    check('audit_review_period_order', sql`${t.periodStart} < ${t.periodEnd}`),
   ],
 );

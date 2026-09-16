@@ -41,6 +41,11 @@ export const AUDIT_ACTIONS = [
   'patient.export',
   /* Staff invited the patient to the self-service portal. */
   'patient.portal_invite',
+  /* A duplicate chart folded into the one that survives, and that merge undone.
+     Separate actions because they are separate events: a reviewer reading the log must be
+     able to see that a merge was reversed without inferring it from a second merge row. */
+  'patient.merge',
+  'patient.unmerge',
 
   'allergy.read',
   'allergy.create',
@@ -89,7 +94,18 @@ export const AUDIT_ACTIONS = [
   'staff.create',
   'staff.update',
   'role.assign',
+  /* The second factor. Enrollment, its confirmation, its use, and its removal are four
+     separate events: "when did this account gain a second factor, and who took it away"
+     is the question an investigation asks after a compromise. */
+  'mfa.enroll',
+  'mfa.confirm',
+  'mfa.challenge',
+  'mfa.disable',
   'audit.read',
+  /* An administrator attested that they reviewed a window of activity. Separate from
+     `audit.read`: reading the log and putting your name to a conclusion about it are
+     different acts, and only the second one is the safeguard 164.308(a)(1)(ii)(D) asks for. */
+  'audit.review',
   /* Producing a §164.528 accounting for a patient. */
   'disclosure.accounting',
   'clinic.configure',
@@ -130,6 +146,8 @@ export const PHI_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'patient.archive',
   'patient.export',
   'patient.portal_invite',
+  'patient.merge',
+  'patient.unmerge',
   'allergy.read',
   'allergy.create',
   'allergy.update',

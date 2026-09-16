@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { headers } from 'next/headers';
+
 import type { Db } from '@/db/client';
 import type { AuditAction } from './actions';
 import { auditEvent } from '@/db/schema';
@@ -49,7 +51,10 @@ export type AuditEntityType =
   | 'payment'
   | 'user_identity'
   | 'patient_identity'
-  | 'audit_event';
+  | 'user_totp'
+  | 'patient_merge'
+  | 'audit_event'
+  | 'audit_review';
 
 export type AuditInput = {
   clinicId: string;
@@ -78,6 +83,10 @@ export type AuditInput = {
   entityId?: string | null;
   purpose?: string | null;
   breakGlassGrantId?: string | null;
+  /**
+   * Normally omitted: resolved from the request by `currentRequestId()`. Pass one only to
+   * attribute a row to a request this call is not running inside.
+   */
   requestId?: string | null;
   /**
    * Field NAMES and result counts only.
@@ -88,6 +97,42 @@ export type AuditInput = {
    */
   metadata?: Record<string, unknown> | null;
 };
+
+/** The UUID shape middleware issues. A shape check, not a version check. */
+const REQUEST_ID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The correlation id for the request being served, or null when there is no request.
+ *
+ * Resolved HERE rather than passed in by callers. There are twenty-six `writeAuditEvent`
+ * call sites across eleven modules, and a correlation id threaded by hand through all of
+ * them is one a future call site forgets — the same reasoning that put authorization and
+ * the audit write itself inside the data-access layer instead of at each caller.
+ *
+ * Returns null rather than throwing in three cases that are all normal:
+ *
+ *   - outside a request scope entirely (the maintenance script, the test suite), where
+ *     `headers()` throws by design;
+ *   - on a path the middleware matcher skips, such as /api/health;
+ *   - when the header is not the shape middleware issues.
+ *
+ * That last one is defence in depth rather than a live threat: middleware overwrites any
+ * inbound `x-request-id` before this can see it. But this value lands in an append-only
+ * table that is retained for six years and read as evidence, so an unvalidated string from
+ * a header does not reach it — the same reasoning as `safeInet` on the actor's IP.
+ *
+ * A missing correlation id must never cost an audit row. The row is the record; the id
+ * only makes it easier to group.
+ */
+export async function currentRequestId(): Promise<string | null> {
+  try {
+    const value = (await headers()).get('x-request-id');
+    return value && REQUEST_ID_SHAPE.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function writeAuditEvent(tx: Tx, input: AuditInput): Promise<void> {
   await tx.insert(auditEvent).values({
@@ -109,7 +154,8 @@ export async function writeAuditEvent(tx: Tx, input: AuditInput): Promise<void> 
     entityId: input.entityId ?? null,
     purpose: input.purpose ?? null,
     breakGlassGrantId: input.breakGlassGrantId ?? null,
-    requestId: input.requestId ?? null,
+    // Explicit value wins; otherwise resolved from the request. See currentRequestId().
+    requestId: input.requestId ?? (await currentRequestId()),
     metadata: input.metadata ?? null,
   });
 }

@@ -785,6 +785,238 @@ describe('self-registration', () => {
   });
 });
 
+/* --------------------------------------------------------- request correlation */
+
+/*
+ * Security review finding F12.
+ *
+ * `audit_event.request_id` existed in the schema from phase 2 and was written as NULL by
+ * every one of the twenty-six call sites, so the rows one request produced could only be
+ * related by actor and timestamp. The failure mode is specifically a silent one — the
+ * column reads as a feature and every row looks well-formed — which is why the check is
+ * here, against a real server, rather than only in the static invariants.
+ */
+describe('request correlation', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  it('gives every response its own correlation id', async () => {
+    const first = await visitor().head('/login');
+    const second = await visitor().head('/login');
+
+    const a = first.headers.get('x-request-id') ?? '';
+    const b = second.headers.get('x-request-id') ?? '';
+
+    expect(a).toMatch(UUID);
+    expect(b).toMatch(UUID);
+    // A reused id would group unrelated work under one reference, which is worse than none.
+    expect(a).not.toBe(b);
+  });
+
+  it('records the id on the audit rows a real request writes', async () => {
+    const session = visitor();
+    const page = await signIn(session, '/login', cast.adminEmail);
+    expect(page.url).toContain('/dashboard');
+
+    /*
+     * Pinned to this actor, and deliberately NOT filtered on `request_id IS NOT NULL`.
+     * Filtering on it would make the query skip past an uncorrelated row to an older
+     * correlated one and report success — the vacuous pass this suite exists to avoid.
+     */
+    const actor = await appPool.query<{ id: string }>(
+      `SELECT id FROM user_account WHERE email = $1`,
+      [cast.adminEmail],
+    );
+    const logged = await appPool.query<{ request_id: string | null }>(
+      `SELECT request_id FROM audit_event
+        WHERE action = 'auth.login' AND outcome = 'allowed' AND actor_user_id = $1
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [actor.rows[0]!.id],
+    );
+
+    expect(logged.rowCount, 'the sign-in wrote an audit row').toBe(1);
+    expect(logged.rows[0]!.request_id, 'that row carries a correlation id').toMatch(UUID);
+  });
+
+  it('never lets one correlation id span two sessions', async () => {
+    /*
+     * The property that makes the id evidence rather than decoration. An id shared across
+     * sessions is what an inbound, client-supplied `x-request-id` would produce — one
+     * account stitching its reads onto another's reference. Middleware overwrites the
+     * inbound header precisely so this cannot happen; this asserts the result.
+     */
+    const grouped = await appPool.query<{ request_id: string; sessions: number }>(
+      `SELECT request_id, count(DISTINCT session_id)::int AS sessions
+         FROM audit_event
+        WHERE request_id IS NOT NULL AND session_id IS NOT NULL
+        GROUP BY request_id`,
+    );
+
+    expect(grouped.rowCount, 'the journeys above wrote correlated rows').toBeGreaterThan(
+      0,
+    );
+    for (const row of grouped.rows) {
+      expect(row.sessions, `request ${row.request_id} spans one session`).toBe(1);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ patient merge */
+
+/*
+ * Merge is administrator-only. The integration suite covers what a merge DOES; these two
+ * cover who can reach it, over real HTTP, through the layout and the page guard — the
+ * layer where a missing `guardPage` looks fine in review and is wide open in production.
+ */
+describe('merging a duplicate chart', () => {
+  it('lets an administrator open the merge screen', async () => {
+    const session = visitor();
+    await signIn(session, '/login', cast.adminEmail);
+
+    const page = await session.get(`/patients/${cast.patientId}/merge`);
+
+    expect(page.status).toBe(200);
+    expect(page.url).toContain('/merge');
+    expect(text(page.html)).toMatch(/merge a duplicate into this chart/i);
+  });
+
+  it('refuses the front desk, who can spot a duplicate but not commit one', async () => {
+    const desk = visitor();
+    await signIn(desk, '/login', cast.receptionEmail);
+
+    const page = await desk.get(`/patients/${cast.patientId}/merge`);
+
+    expect(page.url).toContain('/forbidden');
+    expect(text(page.html)).not.toMatch(/merge a duplicate into this chart/i);
+
+    /* The refusal is recorded, like every other boundary refusal. */
+    const denied = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM audit_event
+        WHERE action = 'authz.denied' AND metadata->>'permission' = 'patient.merge'`,
+    );
+    expect(Number(denied.rows[0]!.n)).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------------------- two-step sign-in */
+
+/*
+ * The second factor, driven the way a person meets it.
+ *
+ * The integration suite proves the codes themselves. What only this layer can prove is the
+ * part that actually protects anything: that the password step creates NO session, so a
+ * correct password and a missing phone leaves the visitor with nothing.
+ */
+describe('two-step sign-in', () => {
+  const PASSWORD_ONLY = '/dashboard';
+
+  /** A staff account of its own, enrolled, so no other journey is affected. */
+  async function enrolledStaff() {
+    const { hashPassword } = await import('@/server/auth/password');
+    const { generateSecret, sealSecret } = await import('@/server/auth/totp');
+
+    const tag = randomUUID().slice(0, 8);
+    const email = `mfa-${tag}@e2e.local`;
+    const secret = generateSecret();
+
+    const user = await appPool.query<{ id: string }>(
+      `INSERT INTO user_account (clinic_id, email, password_hash, full_name, status)
+       VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
+      [cast.clinicId, email, await hashPassword(PASSWORD), `E2E MFA ${tag}`],
+    );
+    const userId = user.rows[0]!.id;
+
+    await appPool.query(
+      `INSERT INTO user_role (user_id, role_id) SELECT $1, id FROM role WHERE code = 'receptionist'`,
+      [userId],
+    );
+    await appPool.query(
+      `INSERT INTO user_totp (user_id, secret_sealed, confirmed_at)
+       VALUES ($1, $2, now())`,
+      [userId, sealSecret(secret, process.env['SESSION_SECRET']!)],
+    );
+
+    return { email, secret, userId };
+  }
+
+  it('stops at the code step, and grants NO session on the password alone', async () => {
+    const { email, userId } = await enrolledStaff();
+
+    const session = visitor();
+    const afterPassword = await signIn(session, '/login', email);
+
+    /* The password was right, and it was not enough. */
+    expect(afterPassword.url).toContain('/login/verify');
+    expect(text(afterPassword.html)).toMatch(/one more step/i);
+
+    /*
+     * THE assertion. Holding whatever cookies the password step set, the dashboard is
+     * still out of reach — because no session row was created, not because a page guard
+     * happened to catch it.
+     */
+    const dashboard = await session.get(PASSWORD_ONLY);
+    expect(dashboard.url).not.toContain('/dashboard');
+
+    const live = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM session WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(Number(live.rows[0]!.n)).toBe(0);
+  });
+
+  it('completes the sign-in when the code is right', async () => {
+    const { email, secret, userId } = await enrolledStaff();
+    const { codeFor, stepFor } = await import('@/server/auth/totp');
+
+    const session = visitor();
+    const challenge = await signIn(session, '/login', email);
+    expect(challenge.url).toContain('/login/verify');
+
+    const done = await session.submit(challenge, 'name="code"', {
+      code: codeFor(secret, stepFor(Date.now())),
+    });
+
+    expect(done.url).toContain('/dashboard');
+
+    /* And only now does a session exist — with the login audited as having used a factor. */
+    const live = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM session WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(Number(live.rows[0]!.n)).toBe(1);
+
+    const audit = await appPool.query<{ metadata: Record<string, unknown> }>(
+      `SELECT metadata FROM audit_event
+        WHERE actor_user_id = $1 AND action = 'auth.login' AND outcome = 'allowed'
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [userId],
+    );
+    expect(audit.rows[0]!.metadata['secondFactor']).toBe('totp');
+  });
+
+  it('refuses a wrong code and still grants nothing', async () => {
+    const { email, userId } = await enrolledStaff();
+
+    const session = visitor();
+    const challenge = await signIn(session, '/login', email);
+    const refused = await session.submit(challenge, 'name="code"', { code: '000000' });
+
+    expect(refused.url).not.toContain('/dashboard');
+    const live = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM session WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(Number(live.rows[0]!.n)).toBe(0);
+  });
+
+  it('sends someone with no challenge straight back to sign-in', async () => {
+    /* The verify page grants nothing on its own: without the signed cookie there is no
+       account to speak of, so there is nothing to reach by typing the URL. */
+    const page = await visitor().get('/login/verify');
+    expect(page.url).toContain('/login');
+    expect(page.url).not.toContain('/verify');
+  });
+});
+
 /* ------------------------------------------------------------------ visit notes */
 
 describe('visit notes in the portal', () => {

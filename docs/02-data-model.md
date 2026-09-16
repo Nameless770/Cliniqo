@@ -140,6 +140,50 @@ grant per pair, while history accumulates. Index `(user_id)` where `revoked_at I
 No DEA number: controlled-substance prescribing is out of scope, and storing a DEA number
 for a capability the system does not offer is a liability with no benefit.
 
+### `user_totp` and `user_recovery_code`
+
+Added with two-step sign-in. Every other control in this system is written in terms of an
+authenticated actor — rate limiting, the PHI read budget, the audit trail, the whole
+permission matrix — so a stolen password is not one compromised control but all of them at
+once, with every action correctly attributed to somebody who did not perform it. A second
+factor is the only thing in that list which survives the password.
+
+`user_totp`: `id` · | `user_id` FK · | `secret_sealed` text · | `confirmed_at` · |
+`last_used_step` integer · | `created_at` · | `disabled_at` / `disabled_by` ·
+
+`user_recovery_code`: `id` · | `user_id` FK · | `code_hash` text · | `created_at` · |
+`used_at` / `used_ip` ·
+
+**Index:** `user_totp (user_id)` unique, partial where `disabled_at IS NULL` — one live
+enrollment per account, and a disabled one must not block a new one or a lost phone locks
+the account out of 2FA permanently. `user_recovery_code (user_id)` partial where
+`used_at IS NULL`, plus a unique index on the hash.
+
+**The secret is ENCRYPTED, not hashed.** Unlike a password it must be read back to compute
+the expected code. AES-256-GCM, keyed from `SESSION_SECRET` by a purpose-scoped derivation
+(`server/auth/totp.ts`). The consequence is recorded there: rotating `SESSION_SECRET` makes
+every enrollment undecryptable and everyone re-enrolls — worse than the re-login rotation
+already causes, and the first thing to revisit if key rotation becomes routine.
+
+**`confirmed_at` is NULL until a working code is produced.** Enabling on a button press is
+how somebody locks themselves out with a mistyped secret or a phone whose clock is wrong.
+
+**`last_used_step` is what makes this a second FACTOR rather than a second field.** A code
+is valid for a thirty-second window, so without spending the counter anyone who watches it
+being typed — or phishes it — can replay it.
+
+**Recovery codes are hashed and single-use**, and spent rather than deleted: a used code is
+evidence that recovery happened, when, and from where, which matters if the recovery itself
+turns out to be the attack. Disabling a factor voids the unspent ones — codes minted against
+a secret that no longer governs the account must not survive it.
+
+**No half-authenticated session ever exists.** The password step creates nothing; it mints a
+short-lived signed token and the `session` row is written only once the second factor
+passes. A session flagged "pending MFA" would make every `getSession()` call responsible for
+remembering the flag, and the one that forgot would be a silent complete bypass.
+
+---
+
 ### `session`
 
 | Field                         | Type        | Sens. | Notes                                                                                                      |
@@ -244,6 +288,42 @@ Medical alerts: infection control, fall risk, safeguarding concerns.
 `created_by` / `created_at` · | `archived_*` ·
 
 **Index:** `(patient_id)` partial where `valid_to IS NULL OR valid_to >= now()`.
+
+---
+
+### `patient_merge`
+
+Added after this document was first written. A duplicate chart folded into the one that
+survives — the reconciliation step that makes two deliberate sources of duplicates safe:
+a front-desk search that misses, and self-registration, which never matches an existing
+record because nothing a sign-up form collects proves identity.
+
+`id` · | `clinic_id` FK · | `surviving_patient_id` FK **C** | `duplicate_patient_id` FK **C** |
+`reason` text · | `manifest` jsonb · | `performed_by` / `performed_at` · |
+`reversed_at` / `reversed_by` / `reversal_reason` ·
+
+**Index:** `(duplicate_patient_id)` unique, partial where `reversed_at IS NULL` — a chart
+can be folded away once at a time, and a reversed merge must not block a later correct one.
+`(surviving_patient_id, performed_at DESC)` for the provenance panel.
+
+**Check:** `surviving_patient_id <> duplicate_patient_id`.
+
+**Trigger:** `cliniqo_patient_merge_no_chains` refuses an insert when either chart has
+already been merged away. Flat structure, so a reversal is always the straight inverse of
+one manifest.
+
+**The rows move.** `patient.merged_into_patient_id` marks the duplicate, but the child rows
+are repointed at the survivor as well — appointments, notes, prescriptions, allergies,
+flags, invoices and triage conversations. A pointer-only merge would need every query in
+the system to follow it, and the one that forgot would hide an allergy, which is the
+failure the merge exists to fix. `manifest` records the moved ids per table so a reversal
+takes back exactly those and not rows the survivor has acquired since.
+
+**What never moves.** `audit_event.subject_patient_id` stays on the duplicate — a §164.528
+accounting for the old MRN must still answer "who read this chart", and the application
+role holds no `UPDATE` on `audit_event` in any case. `break_glass_grant` stays for the same
+reason. Outstanding portal invitations are revoked rather than retargeted; a live portal
+account moves only if the survivor has none, and is otherwise archived.
 
 ---
 
@@ -469,6 +549,38 @@ account does not let anyone rewrite the log.
 - Partial where `break_glass_grant_id IS NOT NULL` — emergency access review queue.
 - Partial where `outcome = 'denied'` — attempted boundary violations. Small, and the most
   interesting index in the schema.
+
+### `audit_review`
+
+Added with the activity review. A completed review of system activity —
+§164.308(a)(1)(ii)(D) requires the review, §164.316(b)(1) requires it documented. The
+filterable viewer answered "what happened"; nothing answered "did anybody check".
+
+`id` · | `clinic_id` FK · | `period_start` / `period_end` timestamptz · |
+`reviewed_by` FK · | `reviewed_at` · | `notes` text · | `findings` jsonb ·
+
+**Index:** `(clinic_id, period_start DESC)`.
+
+**Check:** `period_start < period_end`.
+
+**Privileges:** `cliniqo_app` holds INSERT and SELECT only — `UPDATE`, `DELETE` and
+`TRUNCATE` are revoked in migration 0023. An attestation the application can rewrite
+afterwards is not evidence that a review happened. Deliberately NOT given `audit_event`'s
+belt-and-braces trigger: that catches the schema owner too, because the log is the legal
+record with a six-year duty; this is the smaller claim that the running application cannot
+edit an attestation.
+
+**No unique constraint on the period**, on purpose: a second reviewer covering the same
+window is a stronger control, not a conflict. "Has this period been reviewed" is `EXISTS`.
+
+**`findings` holds counts only, and the server computes them.** It is frozen at review time
+because the log keeps growing and the same query re-run next year returns something else —
+a record naming only a period could not show what was in front of the reviewer. The counts
+are never taken from the form: whoever files the review would otherwise be able to report
+"nothing flagged" over a week that flagged fifty things, and this row is the artifact an
+auditor is shown. No patient identifiers, so the review history can be handed over as-is.
+
+---
 
 ### `break_glass_grant`
 
