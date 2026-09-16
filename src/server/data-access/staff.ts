@@ -5,11 +5,24 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
-import { role, staffSetupToken, userAccount, userIdentity, userRole } from '@/db/schema';
+import {
+  role,
+  staffSetupToken,
+  userAccount,
+  userIdentity,
+  userRole,
+  userTotp,
+} from '@/db/schema';
 import { can } from '@/lib/permissions';
 import type { RoleCode } from '@/lib/roles';
 import { hashPassword, UNUSABLE_PASSWORD } from '@/server/auth/password';
-import { revokeAllSessionsForUser } from '@/server/auth/session';
+import { disableMfa } from '@/server/auth/mfa';
+import {
+  requestMeta,
+  requireSession,
+  revokeAllSessionsForUser,
+  safeInet,
+} from '@/server/auth/session';
 
 import { auditedRead, auditedWrite } from './audited';
 
@@ -67,6 +80,13 @@ export type StaffRow = {
   hasLiveInvitation: boolean;
   /** Has a Google identity linked, so a missing password is expected rather than a problem. */
   signsInWithGoogle: boolean;
+  /**
+   * Holds a confirmed second factor. Existence only — the secret never leaves the auth
+   * module, let alone this projection. It is here so an administrator can see who would
+   * need a reset if they lost their phone, and so the reset button appears only where
+   * there is something to reset.
+   */
+  mfaEnabled: boolean;
   /**
    * Requested access through self-registration and holds no role yet. The administrator's
    * cue to decide: the account can sign in, and can reach nothing until they do.
@@ -139,6 +159,20 @@ export async function listStaff(): Promise<StaffRow[]> {
 
       const liveSet = new Set(live.map((l) => l.userId));
 
+      /* Existence only, same discipline as the Google identities above. */
+      const factors = await tx
+        .select({ userId: userTotp.userId })
+        .from(userTotp)
+        .innerJoin(userAccount, eq(userAccount.id, userTotp.userId))
+        .where(
+          and(
+            eq(userAccount.clinicId, session.clinicId),
+            isNull(userTotp.disabledAt),
+            sql`${userTotp.confirmedAt} is not null`,
+          ),
+        );
+      const mfaSet = new Set(factors.map((f) => f.userId));
+
       const mapped = rows.map((r) => {
         const roles = grants.filter((g) => g.userId === r.id).map((g) => g.code);
         return {
@@ -152,6 +186,7 @@ export async function listStaff(): Promise<StaffRow[]> {
           passwordSet: r.passwordHash !== UNUSABLE_PASSWORD,
           hasLiveInvitation: liveSet.has(r.id),
           signsInWithGoogle: googleSet.has(r.id),
+          mfaEnabled: mfaSet.has(r.id),
           awaitingRole:
             r.selfRegisteredAt !== null &&
             roles.length === 0 &&
@@ -662,4 +697,68 @@ export async function staffAccessRequestBadge(
     );
 
   return row?.value ?? 0;
+}
+
+/**
+ * Remove another account's second factor — the lost phone with the lost recovery codes.
+ *
+ * ==========================================================================
+ * WHY THIS EXISTS AT ALL, GIVEN IT IS A BYPASS
+ * ==========================================================================
+ *
+ * It is the only path back for somebody who has lost both their phone and their printed
+ * codes, and its absence is not a stronger system. A clinician locked out mid-clinic is an
+ * urgent operational problem, and the resolution to an urgent operational problem with no
+ * procedure is someone turning the feature off for the whole practice. A loud, audited,
+ * administrator-only reset is strictly safer than that.
+ *
+ * `staff.update` rather than a permission of its own: this is an administrator acting on a
+ * staff account, the same authority that suspends one or changes its roles. It is audited
+ * as `mfa.disable` with `bySelf: false`, which is the distinction an investigation asks
+ * about first — and it is written by `disableMfa` itself, so this cannot remove a factor
+ * without leaving that record.
+ *
+ * IT DOES NOT SET A NEW ONE. The account returns to password-only and the person enrolls
+ * again from their own settings, so an administrator never handles anybody's secret.
+ */
+export async function resetStaffMfa(userId: string): Promise<StaffWriteResult> {
+  const result = await auditedWrite(
+    {
+      permission: 'staff.update',
+      action: 'mfa.disable',
+      entityType: 'user_totp',
+      entityId: userId,
+      metadata: { via: 'administrator_reset' },
+    },
+    async (tx, session): Promise<StaffWriteResult> => {
+      const [target] = await tx
+        .select({ id: userAccount.id })
+        .from(userAccount)
+        .where(
+          and(eq(userAccount.id, userId), eq(userAccount.clinicId, session.clinicId)),
+        )
+        .limit(1);
+
+      if (!target) return { ok: false, reason: 'not_found' };
+      return { ok: true, userId };
+    },
+  );
+
+  if (!result.ok) return result;
+
+  /* `getSession` is request-cached, so this is the same object the audited layer already
+     authorized against rather than a second read of anything. */
+  const actor = await requireSession();
+  const { ip, userAgent } = await requestMeta();
+
+  await disableMfa(userId, actor.clinicId, actor.userId, safeInet(ip), userAgent);
+
+  /*
+   * Their live sessions go too. Somebody who has lost the device holding their second
+   * factor has, by assumption, lost control of something — and leaving sessions that were
+   * established with the factor still running would be trusting the very thing in doubt.
+   */
+  await revokeAllSessionsForUser(userId, 'admin_revoke');
+
+  return { ok: true, userId };
 }

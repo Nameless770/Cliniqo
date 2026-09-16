@@ -9,6 +9,7 @@ import { AuthorizationError } from '@/server/auth/authorize';
 import {
   createStaffAccount,
   reissueSetupToken,
+  resetStaffMfa,
   setStaffRoles,
   setStaffStatus,
 } from '@/server/data-access/staff';
@@ -185,6 +186,43 @@ export async function setStatusAction(
         parsed.data.status === 'active'
           ? 'Account reactivated.'
           : 'Account deactivated and all their sessions ended.',
+    };
+  } catch (error) {
+    const authz = authzMessage(error);
+    if (authz) return authz;
+    throw error;
+  }
+}
+
+/**
+ * Remove another account's second factor — the lost phone with the lost recovery codes.
+ *
+ * A bypass, and it exists because its absence is not a stronger system: a clinician locked
+ * out mid-clinic is an urgent operational problem, and the resolution to an urgent problem
+ * with no procedure is somebody turning the feature off for the whole practice. Loud,
+ * audited and administrator-only beats that.
+ *
+ * `staff.update` is checked in the data layer, which also ends that account's live sessions
+ * — leaving sessions established with the factor still running would be trusting the very
+ * device now in doubt. It sets no new factor: the person enrolls again from their own
+ * settings, so an administrator never handles anybody's secret.
+ */
+export async function resetStaffMfaAction(
+  _previous: StaffFormState,
+  formData: FormData,
+): Promise<StaffFormState> {
+  const userId = z.uuid().safeParse(formData.get('userId'));
+  if (!userId.success) return { message: 'Invalid account reference.' };
+
+  try {
+    const result = await resetStaffMfa(userId.data);
+    if (!result.ok) return { message: explain(result.reason) };
+
+    revalidatePath('/staff');
+    return {
+      ok: true,
+      message:
+        'Two-step sign-in removed and their sessions ended. Ask them to set it up again.',
     };
   } catch (error) {
     const authz = authzMessage(error);

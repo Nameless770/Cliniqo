@@ -15,6 +15,7 @@ import {
   needsRehash,
   verifyPassword,
 } from '@/server/auth/password';
+import { mintChallenge, requiresSecondFactor } from '@/server/auth/mfa';
 import { checkIpRateLimit, recordAttempt } from '@/server/auth/rate-limit';
 import {
   createSession,
@@ -190,8 +191,40 @@ export async function login(
     return { email, error: GENERIC_FAILURE };
   }
 
-  /* 6. Success. Session row and audit entry commit together — a session that exists
-        without a corresponding log line is exactly what the audit is meant to prevent. */
+  /*
+   * 6. Password proved. If this account carries a second factor, STOP HERE.
+   *
+   * No session is created and nothing is written to `session` — the password step hands
+   * over a short-lived signed token and nothing else. The alternative, a session row
+   * flagged "pending MFA", makes every `getSession()` call in the codebase responsible for
+   * remembering that flag, and the one that forgets is a silent complete bypass that reads
+   * like ordinary code.
+   *
+   * The attempt is recorded as a success for rate-limiting purposes because the password
+   * WAS correct; the audit row for the login itself is written only once the second factor
+   * passes, so the log never shows a sign-in that did not finish.
+   */
+  if (await requiresSecondFactor(account.id)) {
+    await db
+      .update(userAccount)
+      .set({ failedLoginCount: 0, lockedUntil: null })
+      .where(eq(userAccount.id, account.id));
+
+    await recordAttempt({
+      email,
+      ip,
+      userId: account.id,
+      clinicId: account.clinicId,
+      succeeded: true,
+    });
+
+    await mintChallenge(account.id, account.clinicId);
+    redirect('/login/verify');
+  }
+
+  /* 7. No second factor. Session row and audit entry commit together — a session that
+        exists without a corresponding log line is exactly what the audit is meant to
+        prevent. */
   const roleCodes = await db
     .select({ code: role.code })
     .from(userRole)

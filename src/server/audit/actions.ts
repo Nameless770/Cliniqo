@@ -89,6 +89,13 @@ export const AUDIT_ACTIONS = [
   'staff.create',
   'staff.update',
   'role.assign',
+  /* The second factor. Enrollment, its confirmation, its use, and its removal are four
+     separate events: "when did this account gain a second factor, and who took it away"
+     is the question an investigation asks after a compromise. */
+  'mfa.enroll',
+  'mfa.confirm',
+  'mfa.challenge',
+  'mfa.disable',
   'audit.read',
   /* An administrator attested that they reviewed a window of activity. Separate from
      `audit.read`: reading the log and putting your name to a conclusion about it are

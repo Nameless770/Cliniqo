@@ -376,3 +376,112 @@ export const userIdentity = pgTable(
     uniqueIndex('user_identity_user_provider_idx').on(t.userId, t.provider),
   ],
 );
+
+/* -------------------------------------------------------------------------- */
+/* Second factor                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A TOTP enrollment — the second factor for one staff account.
+ *
+ * ==========================================================================
+ * WHY THIS IS WORTH HAVING IN THIS SYSTEM SPECIFICALLY
+ * ==========================================================================
+ *
+ * Every other control here assumes the account is the person. Rate limiting, the read
+ * budget, the audit trail and the whole permission matrix are all written in terms of an
+ * authenticated actor — so a stolen password is not one compromised control, it is all of
+ * them at once, with every action correctly attributed to somebody who did not perform it.
+ * A second factor is the only thing in the list that survives the password.
+ *
+ * ==========================================================================
+ * THE SECRET IS ENCRYPTED, NOT HASHED
+ * ==========================================================================
+ *
+ * Unlike a password it has to be read back to compute the expected code, so it cannot be
+ * hashed. AES-256-GCM, keyed from `SESSION_SECRET` by a purpose-scoped derivation — see
+ * `server/auth/totp.ts`, which also records the consequence: rotating that secret makes
+ * every enrollment here undecryptable and everyone re-enrolls.
+ */
+export const userTotp = pgTable(
+  'user_totp',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id),
+
+    /** `iv.tag.ciphertext`, base64url. Never the raw secret. */
+    secretSealed: text('secret_sealed').notNull(),
+
+    /**
+     * NULL while enrollment is in progress.
+     *
+     * A row is written when setup begins and confirmed only once the user has produced a
+     * working code. Enabling on the strength of "the user clicked enable" is how somebody
+     * locks themselves out with a mistyped secret or a phone whose clock is wrong — and the
+     * recovery path for that is an administrator, which is the pressure that gets 2FA
+     * turned off for the whole clinic.
+     */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+
+    /**
+     * The highest time-step already spent, so a code cannot be used twice.
+     *
+     * Without it a code is valid for its whole 30-second window and anyone who watches it
+     * being typed, or phishes it, can replay it. `integer` is sufficient: steps are
+     * `unix/30`, which does not exceed 2^31 until the year 4000.
+     */
+    lastUsedStep: integer('last_used_step'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * Disabled rather than deleted, and who did it.
+     *
+     * "This account had a second factor and then it did not, on this date, at the hand of
+     * this administrator" is precisely the sequence an investigation asks about.
+     */
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    disabledBy: uuid('disabled_by').references(() => userAccount.id),
+  },
+  (t) => [
+    /** One live enrollment per account; a disabled one does not block a new one. */
+    uniqueIndex('user_totp_user_live_idx')
+      .on(t.userId)
+      .where(sql`${t.disabledAt} is null`),
+  ],
+);
+
+/**
+ * Single-use recovery codes, for the phone that was dropped down a drain.
+ *
+ * Hashed, not encrypted: they are only ever compared, so reversibility buys nothing and
+ * risks everything. See `server/auth/totp.ts` for why a fast HMAC rather than scrypt —
+ * these are full-entropy random, so there is no dictionary to slow down.
+ *
+ * Spent rather than deleted. A used code is evidence that recovery happened, when, and
+ * from where, which matters if the recovery itself turns out to be the attack.
+ */
+export const userRecoveryCode = pgTable(
+  'user_recovery_code',
+  {
+    id: primaryId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id),
+
+    codeHash: text('code_hash').notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    usedIp: inet('used_ip'),
+  },
+  (t) => [
+    /** The verification path: this account's unspent codes. */
+    index('user_recovery_code_live_idx')
+      .on(t.userId)
+      .where(sql`${t.usedAt} is null`),
+    uniqueIndex('user_recovery_code_hash_idx').on(t.codeHash),
+  ],
+);

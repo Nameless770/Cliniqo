@@ -51,6 +51,7 @@ export type AuditEntityType =
   | 'payment'
   | 'user_identity'
   | 'patient_identity'
+  | 'user_totp'
   | 'patient_merge'
   | 'audit_event'
   | 'audit_review';

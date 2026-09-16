@@ -592,9 +592,15 @@ for (const file of readdirSync(actionDir).filter((f) => f.endsWith('.ts'))) {
   const src = read(`${actionDir}/${file}`);
   const exported = (src.match(/^export async function/gm) ?? []).length;
   const parsed = (src.match(/safeParse/g) ?? []).length;
-  // logout and submitNoteAction take no validatable input / delegate.
-  // logout / submitNoteAction / portal logout take no validatable input, or delegate.
-  const exempt = { 'auth.ts': 1, 'notes.ts': 1, 'portal.ts': 1 }[file] ?? 0;
+  /*
+   * Actions with no input to validate. Named individually, because this map is the one
+   * place a genuinely missing zod schema could hide behind a number:
+   *   auth.ts        logout()
+   *   notes.ts       submitNoteAction() — delegates
+   *   portal.ts      portal logout()
+   *   mfa.ts         beginEnrollmentAction() — takes no arguments at all
+   */
+  const exempt = { 'auth.ts': 1, 'notes.ts': 1, 'portal.ts': 1, 'mfa.ts': 1 }[file] ?? 0;
   check(
     'Validation',
     `${file}: every input-taking action validates`,
@@ -1679,6 +1685,101 @@ check(
     'Activity review (F17)',
     'the digest surfaces same-surname access',
     review.includes('sameSurname') && review.includes('string_to_array'),
+  );
+}
+
+/* ------------------------------------------------- Second factor (TOTP) */
+
+/*
+ * Every other control in this system is written in terms of an authenticated actor, so a
+ * stolen password is not one compromised control but all of them. These are the properties
+ * that make the second factor worth having rather than worth bypassing.
+ */
+{
+  const totp = stripComments(read('src/server/auth/totp.ts'));
+  const mfa = stripComments(read('src/server/auth/mfa.ts'));
+  const authAction = stripComments(read('src/server/actions/auth.ts'));
+  const mfaAction = stripComments(read('src/server/actions/mfa.ts'));
+
+  /*
+   * THE bypass to prevent. If the password step created a session flagged "pending", every
+   * getSession() in the codebase would become responsible for remembering the flag, and the
+   * one that forgot would be a silent, complete bypass that reads like ordinary code.
+   */
+  check(
+    'Second factor',
+    'the password step creates no session when a factor is enrolled',
+    /if \(await requiresSecondFactor\(account\.id\)\) \{[\s\S]{0,800}?redirect\('\/login\/verify'\)/.test(
+      authAction,
+    ) &&
+      authAction.indexOf('requiresSecondFactor') <
+        authAction.indexOf('createSession(tx, account.id'),
+  );
+
+  /* The session is created by the CHALLENGE, and the login is audited with it. */
+  check(
+    'Second factor',
+    'the session is created only once the code verifies',
+    mfaAction.includes('createSession(tx, pending.userId') &&
+      mfaAction.indexOf('verifyChallenge(') < mfaAction.indexOf('createSession('),
+  );
+
+  /* A code valid for its whole window is replayable by anyone who watches it typed. */
+  check(
+    'Second factor',
+    'a spent time-step cannot be used again',
+    /if \(lastUsedStep !== null && step <= lastUsedStep\) continue;/.test(totp) &&
+      mfa.includes('lastUsedStep: verdict.step'),
+  );
+
+  /* A secret in a database dump is a permanent second factor for everyone in it. */
+  check(
+    'Second factor',
+    'the secret is encrypted at rest, with an authenticated cipher',
+    totp.includes("createCipheriv('aes-256-gcm'") &&
+      totp.includes('cipher.getAuthTag()') &&
+      mfa.includes('sealSecret(secret, env.SESSION_SECRET)'),
+  );
+
+  /* Enabling on a button press locks people out with a mistyped secret or a wrong clock. */
+  check(
+    'Second factor',
+    'enrollment is only switched on once a working code proves it',
+    mfa.includes('confirmedAt: new Date()') &&
+      /verifyCode\([\s\S]{0,120}?\)[\s\S]{0,200}?if \(!verdict\.ok\)/.test(mfa),
+  );
+
+  /* Recovery codes are compared, never read back — so there is nothing to gain from
+     reversibility and a great deal to lose. */
+  check(
+    'Second factor',
+    'recovery codes are hashed and single-use',
+    totp.includes('hashRecoveryCode') &&
+      !totp.includes('sealRecoveryCode') &&
+      /isNull\(userRecoveryCode\.usedAt\)/.test(mfa),
+  );
+
+  /* Brute-forcing six digits is a million guesses: minutes with a botnet, unthrottled. */
+  check(
+    'Second factor',
+    'the challenge is rate limited',
+    mfaAction.includes('checkIpRateLimit(ip)'),
+  );
+
+  /* Who removed a factor, and whether it was their own, is the first thing an
+     investigation asks after a compromise. */
+  check(
+    'Second factor',
+    'removal records whether it was the account itself or an administrator',
+    mfa.includes('bySelf: actorUserId === userId'),
+  );
+
+  /* An unattended signed-in screen is exactly what this protects against, so removing it
+     from a live session must cost something. */
+  check(
+    'Second factor',
+    'turning your own factor off re-checks the password',
+    mfaAction.includes('verifyPassword(parsed.data.password'),
   );
 }
 

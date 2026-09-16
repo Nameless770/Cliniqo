@@ -7,6 +7,7 @@ import { ROLE_CODES, ROLE_LABELS, type RoleCode } from '@/lib/roles';
 import {
   createStaffAction,
   reissueSetupAction,
+  resetStaffMfaAction,
   setRolesAction,
   setStatusAction,
   type StaffFormState,
@@ -30,6 +31,8 @@ export type StaffView = {
   passwordSet: boolean;
   hasLiveInvitation: boolean;
   signsInWithGoogle: boolean;
+  /** Existence only — enough to offer a reset, nothing about the factor itself. */
+  mfaEnabled: boolean;
   awaitingRole: boolean;
 };
 
@@ -135,6 +138,10 @@ export function StaffAdmin({ staff }: { staff: StaffView[] }) {
     reissueSetupAction,
     {},
   );
+  const [mfaState, mfaFormAction] = useActionState<StaffFormState, FormData>(
+    resetStaffMfaAction,
+    {},
+  );
 
   const [showCreate, setShowCreate] = useState(false);
 
@@ -144,6 +151,7 @@ export function StaffAdmin({ staff }: { staff: StaffView[] }) {
       <Banner state={rowState} />
       <Banner state={statusState} />
       <Banner state={inviteState} />
+      <Banner state={mfaState} />
 
       <div>
         <Button variant="primary" onClick={() => setShowCreate((v) => !v)}>
@@ -338,6 +346,21 @@ export function StaffAdmin({ staff }: { staff: StaffView[] }) {
                   <input type="hidden" name="userId" value={s.id} />
                   <Button type="submit" size="sm" variant="ghost">
                     {s.hasLiveInvitation ? 'Re-issue link' : 'Issue setup link'}
+                  </Button>
+                </form>
+              ) : null}
+
+              {/*
+                Only where there is something to reset. This is the lost-phone-and-lost-
+                codes path: it removes the factor and ends their sessions, and it sets no
+                new one — they enrol again themselves, so no administrator ever handles
+                somebody else's secret.
+              */}
+              {s.mfaEnabled ? (
+                <form action={mfaFormAction}>
+                  <input type="hidden" name="userId" value={s.id} />
+                  <Button type="submit" size="sm" variant="ghost">
+                    Reset two-step
                   </Button>
                 </form>
               ) : null}

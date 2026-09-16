@@ -140,6 +140,50 @@ grant per pair, while history accumulates. Index `(user_id)` where `revoked_at I
 No DEA number: controlled-substance prescribing is out of scope, and storing a DEA number
 for a capability the system does not offer is a liability with no benefit.
 
+### `user_totp` and `user_recovery_code`
+
+Added with two-step sign-in. Every other control in this system is written in terms of an
+authenticated actor — rate limiting, the PHI read budget, the audit trail, the whole
+permission matrix — so a stolen password is not one compromised control but all of them at
+once, with every action correctly attributed to somebody who did not perform it. A second
+factor is the only thing in that list which survives the password.
+
+`user_totp`: `id` · | `user_id` FK · | `secret_sealed` text · | `confirmed_at` · |
+`last_used_step` integer · | `created_at` · | `disabled_at` / `disabled_by` ·
+
+`user_recovery_code`: `id` · | `user_id` FK · | `code_hash` text · | `created_at` · |
+`used_at` / `used_ip` ·
+
+**Index:** `user_totp (user_id)` unique, partial where `disabled_at IS NULL` — one live
+enrollment per account, and a disabled one must not block a new one or a lost phone locks
+the account out of 2FA permanently. `user_recovery_code (user_id)` partial where
+`used_at IS NULL`, plus a unique index on the hash.
+
+**The secret is ENCRYPTED, not hashed.** Unlike a password it must be read back to compute
+the expected code. AES-256-GCM, keyed from `SESSION_SECRET` by a purpose-scoped derivation
+(`server/auth/totp.ts`). The consequence is recorded there: rotating `SESSION_SECRET` makes
+every enrollment undecryptable and everyone re-enrolls — worse than the re-login rotation
+already causes, and the first thing to revisit if key rotation becomes routine.
+
+**`confirmed_at` is NULL until a working code is produced.** Enabling on a button press is
+how somebody locks themselves out with a mistyped secret or a phone whose clock is wrong.
+
+**`last_used_step` is what makes this a second FACTOR rather than a second field.** A code
+is valid for a thirty-second window, so without spending the counter anyone who watches it
+being typed — or phishes it — can replay it.
+
+**Recovery codes are hashed and single-use**, and spent rather than deleted: a used code is
+evidence that recovery happened, when, and from where, which matters if the recovery itself
+turns out to be the attack. Disabling a factor voids the unspent ones — codes minted against
+a secret that no longer governs the account must not survive it.
+
+**No half-authenticated session ever exists.** The password step creates nothing; it mints a
+short-lived signed token and the `session` row is written only once the second factor
+passes. A session flagged "pending MFA" would make every `getSession()` call responsible for
+remembering the flag, and the one that forgot would be a silent complete bypass.
+
+---
+
 ### `session`
 
 | Field                         | Type        | Sens. | Notes                                                                                                      |

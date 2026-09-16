@@ -188,6 +188,7 @@ export const auditEntityType = pgEnum('audit_entity_type', [
   'payment',
   'user_identity',
   'patient_identity',
+  'user_totp',
   'patient_merge',
   /* Reading the audit log is itself an audited event, and its object is the log. */
   'audit_event',

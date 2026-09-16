@@ -896,3 +896,123 @@ describe('merging a duplicate chart', () => {
     expect(Number(denied.rows[0]!.n)).toBeGreaterThan(0);
   });
 });
+
+/* ------------------------------------------------------------- two-step sign-in */
+
+/*
+ * The second factor, driven the way a person meets it.
+ *
+ * The integration suite proves the codes themselves. What only this layer can prove is the
+ * part that actually protects anything: that the password step creates NO session, so a
+ * correct password and a missing phone leaves the visitor with nothing.
+ */
+describe('two-step sign-in', () => {
+  const PASSWORD_ONLY = '/dashboard';
+
+  /** A staff account of its own, enrolled, so no other journey is affected. */
+  async function enrolledStaff() {
+    const { hashPassword } = await import('@/server/auth/password');
+    const { generateSecret, sealSecret } = await import('@/server/auth/totp');
+
+    const tag = randomUUID().slice(0, 8);
+    const email = `mfa-${tag}@e2e.local`;
+    const secret = generateSecret();
+
+    const user = await appPool.query<{ id: string }>(
+      `INSERT INTO user_account (clinic_id, email, password_hash, full_name, status)
+       VALUES ($1, $2, $3, $4, 'active') RETURNING id`,
+      [cast.clinicId, email, await hashPassword(PASSWORD), `E2E MFA ${tag}`],
+    );
+    const userId = user.rows[0]!.id;
+
+    await appPool.query(
+      `INSERT INTO user_role (user_id, role_id) SELECT $1, id FROM role WHERE code = 'receptionist'`,
+      [userId],
+    );
+    await appPool.query(
+      `INSERT INTO user_totp (user_id, secret_sealed, confirmed_at)
+       VALUES ($1, $2, now())`,
+      [userId, sealSecret(secret, process.env['SESSION_SECRET']!)],
+    );
+
+    return { email, secret, userId };
+  }
+
+  it('stops at the code step, and grants NO session on the password alone', async () => {
+    const { email, userId } = await enrolledStaff();
+
+    const session = visitor();
+    const afterPassword = await signIn(session, '/login', email);
+
+    /* The password was right, and it was not enough. */
+    expect(afterPassword.url).toContain('/login/verify');
+    expect(text(afterPassword.html)).toMatch(/one more step/i);
+
+    /*
+     * THE assertion. Holding whatever cookies the password step set, the dashboard is
+     * still out of reach — because no session row was created, not because a page guard
+     * happened to catch it.
+     */
+    const dashboard = await session.get(PASSWORD_ONLY);
+    expect(dashboard.url).not.toContain('/dashboard');
+
+    const live = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM session WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(Number(live.rows[0]!.n)).toBe(0);
+  });
+
+  it('completes the sign-in when the code is right', async () => {
+    const { email, secret, userId } = await enrolledStaff();
+    const { codeFor, stepFor } = await import('@/server/auth/totp');
+
+    const session = visitor();
+    const challenge = await signIn(session, '/login', email);
+    expect(challenge.url).toContain('/login/verify');
+
+    const done = await session.submit(challenge, 'name="code"', {
+      code: codeFor(secret, stepFor(Date.now())),
+    });
+
+    expect(done.url).toContain('/dashboard');
+
+    /* And only now does a session exist — with the login audited as having used a factor. */
+    const live = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM session WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(Number(live.rows[0]!.n)).toBe(1);
+
+    const audit = await appPool.query<{ metadata: Record<string, unknown> }>(
+      `SELECT metadata FROM audit_event
+        WHERE actor_user_id = $1 AND action = 'auth.login' AND outcome = 'allowed'
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [userId],
+    );
+    expect(audit.rows[0]!.metadata['secondFactor']).toBe('totp');
+  });
+
+  it('refuses a wrong code and still grants nothing', async () => {
+    const { email, userId } = await enrolledStaff();
+
+    const session = visitor();
+    const challenge = await signIn(session, '/login', email);
+    const refused = await session.submit(challenge, 'name="code"', { code: '000000' });
+
+    expect(refused.url).not.toContain('/dashboard');
+    const live = await appPool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM session WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId],
+    );
+    expect(Number(live.rows[0]!.n)).toBe(0);
+  });
+
+  it('sends someone with no challenge straight back to sign-in', async () => {
+    /* The verify page grants nothing on its own: without the signed cookie there is no
+       account to speak of, so there is nothing to reach by typing the URL. */
+    const page = await visitor().get('/login/verify');
+    expect(page.url).toContain('/login');
+    expect(page.url).not.toContain('/verify');
+  });
+});
