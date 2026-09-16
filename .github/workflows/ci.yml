@@ -137,6 +137,16 @@ jobs:
 
       - run: npm ci
 
+      # The service container creates an EMPTY `cliniqo`. Nothing had applied the
+      # migrations to it, so the step below queried a `permission` table that did not
+      # exist and the job had failed on every run since it was added — including on main,
+      # which is why a red X there stopped meaning anything. The suite was never reached.
+      #
+      # `db:migrate`, not `db:test-setup`: the latter builds the separate `cliniqo_test`
+      # database that vitest uses, which is not the one `check:permissions` reads.
+      - name: Apply migrations
+        run: npm run db:migrate
+
       # Rebuilds cliniqo_test from the checked-in migrations, then runs the suite:
       # audit append-only (including every partition's grants), concurrent double-booking,
       # signed-note and prescription freezing, controlled-substance refusal — and the
