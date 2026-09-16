@@ -1,5 +1,5 @@
 {
-  "id": "da32b6b3-d594-43e4-af4c-16f9de0ae47b",
+  "id": "7b9f6285-e3a2-4c2a-ac42-3605ecef7072",
   "prevId": "a3691707-e227-432c-b560-56e4118d7847",
   "version": "7",
   "dialect": "postgresql",
@@ -2928,196 +2928,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.patient_merge": {
-      "name": "patient_merge",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "clinic_id": {
-          "name": "clinic_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "surviving_patient_id": {
-          "name": "surviving_patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "duplicate_patient_id": {
-          "name": "duplicate_patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "manifest": {
-          "name": "manifest",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "performed_by": {
-          "name": "performed_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "performed_at": {
-          "name": "performed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "reversed_at": {
-          "name": "reversed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reversed_by": {
-          "name": "reversed_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reversal_reason": {
-          "name": "reversal_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "patient_merge_duplicate_live_idx": {
-          "name": "patient_merge_duplicate_live_idx",
-          "columns": [
-            {
-              "expression": "duplicate_patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"patient_merge\".\"reversed_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "patient_merge_surviving_idx": {
-          "name": "patient_merge_surviving_idx",
-          "columns": [
-            {
-              "expression": "surviving_patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "performed_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "patient_merge_clinic_id_clinic_id_fk": {
-          "name": "patient_merge_clinic_id_clinic_id_fk",
-          "tableFrom": "patient_merge",
-          "tableTo": "clinic",
-          "columnsFrom": [
-            "clinic_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_merge_surviving_patient_id_patient_id_fk": {
-          "name": "patient_merge_surviving_patient_id_patient_id_fk",
-          "tableFrom": "patient_merge",
-          "tableTo": "patient",
-          "columnsFrom": [
-            "surviving_patient_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_merge_duplicate_patient_id_patient_id_fk": {
-          "name": "patient_merge_duplicate_patient_id_patient_id_fk",
-          "tableFrom": "patient_merge",
-          "tableTo": "patient",
-          "columnsFrom": [
-            "duplicate_patient_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_merge_performed_by_user_account_id_fk": {
-          "name": "patient_merge_performed_by_user_account_id_fk",
-          "tableFrom": "patient_merge",
-          "tableTo": "user_account",
-          "columnsFrom": [
-            "performed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "patient_merge_reversed_by_user_account_id_fk": {
-          "name": "patient_merge_reversed_by_user_account_id_fk",
-          "tableFrom": "patient_merge",
-          "tableTo": "user_account",
-          "columnsFrom": [
-            "reversed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "patient_merge_distinct": {
-          "name": "patient_merge_distinct",
-          "value": "\"patient_merge\".\"surviving_patient_id\" <> \"patient_merge\".\"duplicate_patient_id\""
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.appointment": {
       "name": "appointment",
       "schema": "",
@@ -3929,6 +3739,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "portal_withheld_at": {
+          "name": "portal_withheld_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_withheld_by": {
+          "name": "portal_withheld_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_withheld_reason": {
+          "name": "portal_withheld_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4103,6 +3931,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "visit_note_portal_withheld_by_user_account_id_fk": {
+          "name": "visit_note_portal_withheld_by_user_account_id_fk",
+          "tableFrom": "visit_note",
+          "tableTo": "user_account",
+          "columnsFrom": [
+            "portal_withheld_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "visit_note_archived_by_user_account_id_fk": {
           "name": "visit_note_archived_by_user_account_id_fk",
           "tableFrom": "visit_note",
@@ -4120,7 +3961,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "visit_note_portal_withheld_complete_chk": {
+          "name": "visit_note_portal_withheld_complete_chk",
+          "value": "(\"visit_note\".\"portal_withheld_at\" is null and \"visit_note\".\"portal_withheld_by\" is null and \"visit_note\".\"portal_withheld_reason\" is null)\n       or (\"visit_note\".\"portal_withheld_at\" is not null and \"visit_note\".\"portal_withheld_by\" is not null\n           and length(btrim(\"visit_note\".\"portal_withheld_reason\")) > 0)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.visit_note_version": {
@@ -6397,7 +6243,6 @@
         "payment",
         "user_identity",
         "patient_identity",
-        "patient_merge",
         "audit_event"
       ]
     },

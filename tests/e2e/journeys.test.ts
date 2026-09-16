@@ -1016,3 +1016,106 @@ describe('two-step sign-in', () => {
     expect(page.url).not.toContain('/verify');
   });
 });
+
+/* ------------------------------------------------------------------ visit notes */
+
+describe('visit notes in the portal', () => {
+  /*
+   * Three notes for the seeded patient, written straight to the database — what is under
+   * test is what each audience is SHOWN. Each carries a phrase that must never appear where
+   * it should not, searched for in the raw HTML, which includes Next's serialised payload.
+   */
+  const notes = { visible: '', draft: '', held: '' };
+
+  async function note(
+    status: 'draft' | 'signed',
+    phrase: string,
+    withheld: boolean,
+  ): Promise<string> {
+    const row = await appPool.query<{ id: string }>(
+      `INSERT INTO visit_note (clinic_id, patient_id, author_user_id, status, signed_at, signed_by,
+                               portal_withheld_at, portal_withheld_by, portal_withheld_reason)
+       VALUES ($1, $2, $3::uuid, $4::visit_note_status,
+               CASE WHEN $4::text = 'draft' THEN NULL ELSE now() END,
+               CASE WHEN $4::text = 'draft' THEN NULL ELSE $3::uuid END,
+               CASE WHEN $5::boolean THEN now() END,
+               CASE WHEN $5::boolean THEN $3::uuid END,
+               CASE WHEN $5::boolean THEN 'E2E-REASON-TEXT: talk in person first' END)
+       RETURNING id`,
+      [cast.clinicId, cast.patientId, cast.doctorId, status, withheld],
+    );
+    const id = row.rows[0]!.id;
+    const version = await appPool.query<{ id: string }>(
+      `INSERT INTO visit_note_version (clinic_id, visit_note_id, version_number, kind,
+                                       chief_complaint, plan, authored_by_user_id, frozen_at)
+       VALUES ($1, $2, 1, $3::visit_note_version_kind, $4, 'Rest and fluids', $5,
+               CASE WHEN $3::text = 'draft' THEN NULL ELSE now() END)
+       RETURNING id`,
+      [cast.clinicId, id, status === 'draft' ? 'draft' : 'signed', phrase, cast.doctorId],
+    );
+    await appPool.query(`UPDATE visit_note SET current_version_id = $1 WHERE id = $2`, [
+      version.rows[0]!.id,
+      id,
+    ]);
+    return id;
+  }
+
+  beforeAll(async () => {
+    notes.visible = await note('signed', 'E2E-VISIBLE-NOTE sore throat', false);
+    notes.draft = await note('draft', 'E2E-DRAFT-NOTE unfinished', false);
+    notes.held = await note('signed', 'E2E-HELD-NOTE difficult news', true);
+  });
+
+  it('shows a patient their signed notes, and never a draft or a held-back note', async () => {
+    const session = visitor();
+    await signIn(session, '/portal/login', cast.patientEmail);
+
+    const home = await session.get('/portal');
+    expect(home.html).toContain('href="/portal/visits"');
+
+    const page = await session.get('/portal/visits');
+    expect(page.status).toBe(200);
+    const body = text(page.html);
+
+    expect(body).toContain('E2E-VISIBLE-NOTE');
+    expect(body).toMatch(/reason for visit/i);
+
+    /* The raw HTML, not just the visible text: nothing may hide in the page payload either. */
+    expect(page.html).not.toContain('E2E-DRAFT-NOTE');
+    expect(page.html).not.toContain('E2E-HELD-NOTE');
+    expect(page.html).not.toContain('E2E-REASON-TEXT');
+
+    /* But the patient is told a note was held back, and that they can ask for a review. */
+    expect(body).toMatch(/not available online yet/i);
+    expect(body).toMatch(/reviewed by another clinician/i);
+  });
+
+  it('shows another patient none of it', async () => {
+    const session = visitor();
+    await signIn(session, '/portal/login', cast.otherPatientEmail);
+    const page = await session.get('/portal/visits');
+
+    expect(page.status).toBe(200);
+    expect(page.html).not.toContain('E2E-VISIBLE-NOTE');
+    expect(text(page.html)).not.toMatch(/not available online yet/i);
+  });
+
+  it('tells staff whether the patient can see a note, and gives the control only to clinicians', async () => {
+    const admin = visitor();
+    await signIn(admin, '/login', cast.adminEmail);
+
+    const visible = await admin.get(`/notes/${notes.visible}?patient=${cast.patientId}`);
+    expect(text(visible.html)).toMatch(/visible to the patient in their portal/i);
+
+    const held = await admin.get(`/notes/${notes.held}?patient=${cast.patientId}`);
+    expect(text(held.html)).toMatch(/hidden from the patient/i);
+    expect(text(held.html)).toContain('E2E-REASON-TEXT');
+
+    /*
+     * An administrator can read notes but cannot sign them, so gets no hide or release
+     * button. Withholding is a clinical judgement; the data layer refuses it regardless.
+     */
+    expect(held.html).not.toMatch(/release to patient portal/i);
+    expect(visible.html).not.toMatch(/hide from patient portal/i);
+  });
+});

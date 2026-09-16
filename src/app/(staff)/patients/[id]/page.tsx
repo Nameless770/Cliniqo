@@ -513,6 +513,9 @@ export default async function PatientProfilePage({
                     <Badge tone={note.status === 'draft' ? 'warning' : 'success'}>
                       {NOTE_STATUS_LABELS[note.status]}
                     </Badge>
+                    {note.portalWithheldAt ? (
+                      <Badge tone="warning">Hidden from patient portal</Badge>
+                    ) : null}
                     <strong style={{ fontSize: 'var(--text-sm)' }}>
                       {note.authorName}
                     </strong>

@@ -6,13 +6,20 @@ import {
   addendumInput,
   isNoteEmpty,
   noteContentInput,
+  notePortalVisibilityInput,
   saveDraftInput,
   signNoteInput,
   startNoteInput,
 } from '@/lib/note-schemas';
 import { formFields, toFieldErrors, type FieldErrors } from '@/lib/patient-schemas';
 import { AuthorizationError } from '@/server/auth/authorize';
-import { addAddendum, createNote, saveDraft, signNote } from '@/server/data-access/notes';
+import {
+  addAddendum,
+  createNote,
+  saveDraft,
+  setNotePortalVisibility,
+  signNote,
+} from '@/server/data-access/notes';
 
 /**
  * Visit note server actions.
@@ -197,6 +204,57 @@ export async function addAddendumAction(
 
     revalidatePath(`/patients/${patientId}`);
     return { ok: true, message: 'Addendum added. The original version is unchanged.' };
+  } catch (error) {
+    const authz = authzMessage(error);
+    if (authz) return authz;
+    throw error;
+  }
+}
+
+/**
+ * Withhold a signed note from the patient's portal, or release it.
+ *
+ * The permission check is inside `setNotePortalVisibility` (note.sign), first thing, as for
+ * every data operation. This validates the shape and translates the result into words.
+ */
+export async function setNotePortalVisibilityAction(
+  _previous: NoteFormState,
+  formData: FormData,
+): Promise<NoteFormState> {
+  const parsed = notePortalVisibilityInput.safeParse(formFields(formData));
+  if (!parsed.success) return { errors: toFieldErrors(parsed.error) };
+
+  const { noteId, patientId } = parsed.data;
+
+  try {
+    const result = await setNotePortalVisibility(
+      noteId,
+      patientId,
+      parsed.data.intent === 'withhold'
+        ? { withhold: true, reason: parsed.data.reason }
+        : { withhold: false },
+    );
+
+    if (!result.ok) {
+      return {
+        message:
+          result.reason === 'not_signed'
+            ? 'Drafts are never shown to patients, so there is nothing to hide yet.'
+            : result.reason === 'unchanged'
+              ? 'This note is already in that state. Reload to see the latest.'
+              : 'That note could not be found.',
+      };
+    }
+
+    revalidatePath(`/notes/${noteId}`);
+    revalidatePath(`/patients/${patientId}`);
+    return {
+      ok: true,
+      message:
+        parsed.data.intent === 'withhold'
+          ? 'Hidden from the patient portal. The patient will see that a note exists but not its content.'
+          : 'Released. The patient can now read this note in their portal.',
+    };
   } catch (error) {
     const authz = authzMessage(error);
     if (authz) return authz;

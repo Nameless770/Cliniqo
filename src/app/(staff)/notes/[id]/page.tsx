@@ -7,6 +7,7 @@ import { guardPage } from '@/server/auth/authorize';
 import { getNote } from '@/server/data-access/notes';
 
 import { NoteEditor } from '../NoteEditor';
+import { PortalVisibility } from './PortalVisibility';
 
 /**
  * Write or amend a visit note.
@@ -42,6 +43,8 @@ export default async function NotePage({
   const isDraft = note.status === 'draft';
   const mayWrite = session.permissions.has('note.create');
   const mayAmend = session.permissions.has('note.amend');
+  /* The clinicians who can sign a note decide whether the patient reads it online yet. */
+  const mayDecidePortal = session.permissions.has('note.sign');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -65,6 +68,52 @@ export default async function NotePage({
           started by {note.authorName} - version {note.versions.length}
         </p>
       </div>
+
+      {/*
+        Whether the patient can read this note in their portal. Drafts never can, so the
+        section only exists once the note is signed. The reason is rendered HERE, on the
+        server — the interactive control below is given ids and a yes/no, not clinical text.
+      */}
+      {!isDraft ? (
+        <section
+          style={{
+            display: 'grid',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-3) var(--space-4)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+            background: note.portalWithheldAt
+              ? 'var(--status-warn-bg)'
+              : 'var(--bg-surface)',
+          }}
+        >
+          <h2 style={{ fontSize: 'var(--text-sm)', margin: 0 }}>Patient portal</h2>
+          {note.portalWithheldAt ? (
+            <>
+              <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+                <strong>Hidden from the patient.</strong> They see that a note from this
+                visit is held back, not what it says.
+              </p>
+              <p
+                style={{ margin: 0, fontSize: 'var(--text-sm)', whiteSpace: 'pre-wrap' }}
+              >
+                Reason: {note.portalWithheldReason}
+              </p>
+            </>
+          ) : (
+            <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+              Visible to the patient in their portal, including any addenda.
+            </p>
+          )}
+          {mayDecidePortal ? (
+            <PortalVisibility
+              noteId={note.id}
+              patientId={note.patientId}
+              withheld={note.portalWithheldAt !== null}
+            />
+          ) : null}
+        </section>
+      ) : null}
 
       {isDraft && mayWrite ? (
         <NoteEditor

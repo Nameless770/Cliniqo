@@ -1,6 +1,6 @@
 {
-  "id": "e68a2dad-cc5e-4ec7-8c52-bdf7cffde800",
-  "prevId": "65c895da-b2f5-46b0-9ba2-50c3bae31fe9",
+  "id": "9726a283-9853-4d5e-8717-618aeef7eaa0",
+  "prevId": "ff680f8c-e02a-4414-a5e4-dc43dd2db0f4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1291,103 +1291,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.user_recovery_code": {
-      "name": "user_recovery_code",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code_hash": {
-          "name": "code_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "used_at": {
-          "name": "used_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "used_ip": {
-          "name": "used_ip",
-          "type": "inet",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "user_recovery_code_live_idx": {
-          "name": "user_recovery_code_live_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"user_recovery_code\".\"used_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "user_recovery_code_hash_idx": {
-          "name": "user_recovery_code_hash_idx",
-          "columns": [
-            {
-              "expression": "code_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "user_recovery_code_user_id_user_account_id_fk": {
-          "name": "user_recovery_code_user_id_user_account_id_fk",
-          "tableFrom": "user_recovery_code",
-          "tableTo": "user_account",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.user_role": {
       "name": "user_role",
       "schema": "",
@@ -1523,113 +1426,6 @@
           "tableTo": "user_account",
           "columnsFrom": [
             "revoked_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.user_totp": {
-      "name": "user_totp",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "secret_sealed": {
-          "name": "secret_sealed",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "confirmed_at": {
-          "name": "confirmed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_used_step": {
-          "name": "last_used_step",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "disabled_at": {
-          "name": "disabled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disabled_by": {
-          "name": "disabled_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "user_totp_user_live_idx": {
-          "name": "user_totp_user_live_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"user_totp\".\"disabled_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "user_totp_user_id_user_account_id_fk": {
-          "name": "user_totp_user_id_user_account_id_fk",
-          "tableFrom": "user_totp",
-          "tableTo": "user_account",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "user_totp_disabled_by_user_account_id_fk": {
-          "name": "user_totp_disabled_by_user_account_id_fk",
-          "tableFrom": "user_totp",
-          "tableTo": "user_account",
-          "columnsFrom": [
-            "disabled_by"
           ],
           "columnsTo": [
             "id"
@@ -4133,6 +3929,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "portal_withheld_at": {
+          "name": "portal_withheld_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_withheld_by": {
+          "name": "portal_withheld_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_withheld_reason": {
+          "name": "portal_withheld_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4307,6 +4121,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "visit_note_portal_withheld_by_user_account_id_fk": {
+          "name": "visit_note_portal_withheld_by_user_account_id_fk",
+          "tableFrom": "visit_note",
+          "tableTo": "user_account",
+          "columnsFrom": [
+            "portal_withheld_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "visit_note_archived_by_user_account_id_fk": {
           "name": "visit_note_archived_by_user_account_id_fk",
           "tableFrom": "visit_note",
@@ -4324,7 +4151,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "visit_note_portal_withheld_complete_chk": {
+          "name": "visit_note_portal_withheld_complete_chk",
+          "value": "(\"visit_note\".\"portal_withheld_at\" is null and \"visit_note\".\"portal_withheld_by\" is null and \"visit_note\".\"portal_withheld_reason\" is null)\n       or (\"visit_note\".\"portal_withheld_at\" is not null and \"visit_note\".\"portal_withheld_by\" is not null\n           and length(btrim(\"visit_note\".\"portal_withheld_reason\")) > 0)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.visit_note_version": {
@@ -6718,7 +6550,6 @@
         "payment",
         "user_identity",
         "patient_identity",
-        "user_totp",
         "patient_merge",
         "audit_event",
         "audit_review"
