@@ -283,6 +283,16 @@ export function StaffAdmin({ staff }: { staff: StaffView[] }) {
                   Requested access: choose a role or deactivate
                 </Badge>
               ) : null}
+              {s.awaitingRole && !s.signsInWithGoogle ? (
+                /*
+                 * Signed up with a password: nobody has proven they own this address, so
+                 * "it's from dr.smith@…" is exactly what an impersonator would type. Say
+                 * so at the moment of the decision, not in a manual.
+                 */
+                <Badge tone="danger">
+                  Email not confirmed: check it is really them before giving a role
+                </Badge>
+              ) : null}
               {s.signsInWithGoogle ? (
                 <Badge tone="info">Signs in with Google</Badge>
               ) : null}

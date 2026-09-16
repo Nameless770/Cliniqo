@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { clientEnv } from '@/env/client';
 import { googleConfig } from '@/server/auth/google';
-import { signupClinicId } from '@/server/auth/pending-signup';
+import { passwordSignupClinicId, signupClinicId } from '@/server/auth/pending-signup';
 import { getSession } from '@/server/auth/session';
 
 import { LoginForm } from './LoginForm';
@@ -11,9 +11,12 @@ import { LoginForm } from './LoginForm';
 /**
  * Sign-in.
  *
- * A Server Component that renders the form island. There is no self-registration link:
- * accounts are created by an administrator (phase 8), which is what keeps
- * §164.312(a)(2)(i) — one account per identified human — enforceable.
+ * A Server Component that renders the form island.
+ *
+ * "Create an account" appears only when a clinic has switched staff sign-up on, and an
+ * account created that way has no roles: an administrator still decides what each person
+ * may do, which is what keeps §164.312(a)(2)(i) — one account per identified human, with
+ * access granted deliberately — enforceable.
  */
 const appName = clientEnv.NEXT_PUBLIC_APP_NAME;
 
@@ -22,7 +25,7 @@ export const metadata = { title: 'Sign in · Cliniqo' };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; registered?: string }>;
 }) {
   // Already signed in — don't show a login form to an authenticated user.
   if (await getSession()) redirect('/dashboard');
@@ -31,7 +34,8 @@ export default async function LoginPage({
   const google = googleConfig();
   /* Only ever true alongside Google: the env validator refuses sign-up without it. */
   const signupOpen = Boolean(google && signupClinicId('staff'));
-  const { error } = await searchParams;
+  const createAccountOpen = signupOpen || Boolean(passwordSignupClinicId('staff'));
+  const { error, registered } = await searchParams;
 
   return (
     <section style={{ maxWidth: '22rem', width: '100%' }}>
@@ -125,7 +129,40 @@ export default async function LoginPage({
         </p>
       ) : null}
 
+      {/*
+        After "Create an account". Deliberately the same words whether or not an account was
+        actually created: saying "that email is already registered" would let anyone check
+        which addresses belong to staff here.
+      */}
+      {registered === '1' ? (
+        <p
+          role="status"
+          style={{
+            margin: '0 0 var(--space-4)',
+            padding: 'var(--space-2) var(--space-3)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          Now sign in with the email and password you chose. A new account has no access
+          until an administrator gives you a role. If that email already had an account,
+          use its existing password.
+        </p>
+      ) : null}
+
       <LoginForm />
+
+      {/*
+        The way to create an account, where people look for it: right under the sign-in
+        button. Shown only when some form of staff sign-up is switched on.
+      */}
+      {createAccountOpen ? (
+        <p style={{ margin: 'var(--space-4) 0 0', fontSize: 'var(--text-sm)' }}>
+          New here? <Link href="/signup">Create an account</Link>
+        </p>
+      ) : null}
 
       {google ? (
         <>

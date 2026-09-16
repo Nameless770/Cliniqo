@@ -193,6 +193,39 @@ export const patientSelfSignupInput = z
 
 export type PatientSelfSignupInput = z.infer<typeof patientSelfSignupInput>;
 
+/**
+ * A patient creating an account with an email and a password.
+ *
+ * The same identity fields as the Google path, plus the address and a password under the
+ * same policy as everywhere else in the application: length over composition.
+ */
+export const patientPasswordSignupInput = z
+  .object({
+    email: z
+      .string({ message: 'Enter your email address.' })
+      .trim()
+      .toLowerCase()
+      .min(1, 'Enter your email address.')
+      .max(254)
+      .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Enter a valid email address.'),
+    password: z
+      .string()
+      .min(12, 'Use at least 12 characters. A short phrase works well.')
+      .max(1024),
+    confirm: z.string(),
+    legalFirstName: requiredText('First name', 100),
+    legalLastName: requiredText('Last name', 100),
+    dateOfBirth,
+    phonePrimary: phone,
+  })
+  .strict()
+  .refine((v) => v.password === v.confirm, {
+    path: ['confirm'],
+    message: 'Those do not match.',
+  });
+
+export type PatientPasswordSignupInput = z.infer<typeof patientPasswordSignupInput>;
+
 export const patientSearchInput = z.object({
   /** Empty means "list everyone", which is a legitimate roster view. */
   query: z.string().trim().max(120).optional().default(''),

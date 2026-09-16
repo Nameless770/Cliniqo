@@ -3,7 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
-import { formFields, patientSelfSignupInput } from '@/lib/patient-schemas';
+import {
+  formFields,
+  patientPasswordSignupInput,
+  patientSelfSignupInput,
+} from '@/lib/patient-schemas';
 import {
   portalBookInput,
   portalCancelInput,
@@ -18,10 +22,12 @@ import { requestMeta, safeInet } from '@/server/auth/session';
 import { redeemPatientSetupToken, verifyPatientLogin } from '@/server/portal/accounts';
 import {
   clearPendingSignup,
+  passwordSignupClinicId,
   readPendingSignup,
   signupClinicId,
 } from '@/server/auth/pending-signup';
 import { unlinkGoogle } from '@/server/portal/google';
+import { registerPatientWithPassword } from '@/server/portal/password-signup';
 import { createSelfRegisteredPatient } from '@/server/portal/signup';
 import { sendTriageMessage } from '@/server/portal/triage';
 import {
@@ -395,4 +401,42 @@ export async function completePatientSignupAction(
 
   await setPortalCookie(result.token, result.expiresAt);
   redirect('/portal?welcome=1');
+}
+
+/**
+ * Create a patient portal account with an email and a password.
+ *
+ * ONE OUTCOME for every valid submission — the sign-in page, with the same message — whether a
+ * new record was created or the address already had an account. "That email is already
+ * registered", at a medical practice, means "that person is a patient here".
+ *
+ * Never looks for an existing patient; never signs in; never replaces an existing password.
+ * See `registerPatientWithPassword`.
+ */
+export async function createPatientAccountAction(
+  _prev: PortalFormState,
+  formData: FormData,
+): Promise<PortalFormState> {
+  const clinicId = passwordSignupClinicId('portal');
+  if (!clinicId) redirect('/portal/login');
+
+  const parsed = patientPasswordSignupInput.safeParse(formFields(formData));
+  if (!parsed.success) return { errors: fieldErrors(parsed.error) };
+
+  const { ip: rawIp, userAgent } = await requestMeta();
+  const ip = safeInet(rawIp);
+
+  const verdict = await checkIpRateLimit(ip);
+  if (!verdict.allowed) {
+    return {
+      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
+    };
+  }
+
+  const result = await registerPatientWithPassword(parsed.data, clinicId, ip, userAgent);
+
+  /* A taken address counts against the per-IP limit; the page does not know which it was. */
+  await recordAttempt({ email: parsed.data.email, ip, succeeded: result.created });
+
+  redirect('/portal/login?registered=1');
 }

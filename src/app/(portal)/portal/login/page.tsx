@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
-import { signupClinicId } from '@/server/auth/pending-signup';
+import { passwordSignupClinicId, signupClinicId } from '@/server/auth/pending-signup';
 import { portalGoogleConfig } from '@/server/portal/google';
 import { getPatientSession } from '@/server/portal/session';
 
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function PortalLoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; registered?: string }>;
 }) {
   // Already signed in? Go straight to the portal.
   if (await getPatientSession()) redirect('/portal');
@@ -22,7 +22,8 @@ export default async function PortalLoginPage({
      `portalGoogleConfig` for why it is a separate decision from staff sign-in. */
   const google = portalGoogleConfig();
   const signupOpen = Boolean(google && signupClinicId('portal'));
-  const { error } = await searchParams;
+  const createAccountOpen = signupOpen || Boolean(passwordSignupClinicId('portal'));
+  const { error, registered } = await searchParams;
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-5)', marginTop: 'var(--space-8)' }}>
@@ -89,7 +90,35 @@ export default async function PortalLoginPage({
         </p>
       ) : null}
 
+      {/*
+        After "Create an account". The same words whether or not an account was created:
+        "that email is already registered", at a medical practice, would mean "that person
+        is a patient here".
+      */}
+      {registered === '1' ? (
+        <p
+          role="status"
+          style={{
+            margin: 0,
+            padding: 'var(--space-2) var(--space-3)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface)',
+            fontSize: 'var(--text-sm)',
+          }}
+        >
+          Now sign in with the email and password you chose. If that email already had an
+          account here, use its existing password.
+        </p>
+      ) : null}
+
       <PortalLoginForm />
+
+      {createAccountOpen ? (
+        <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+          New patient? <Link href="/portal/signup">Create an account</Link>
+        </p>
+      ) : null}
 
       {google ? (
         <div style={{ display: 'grid', gap: 'var(--space-3)' }}>

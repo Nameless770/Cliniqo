@@ -1865,6 +1865,114 @@ check(
   );
 }
 
+/* ---------------------------------------------------------- password sign-up */
+
+/*
+ * Email-and-password sign-up. Nothing proves the address, so every guarantee here is about
+ * making an unproven account harmless and making the form unable to answer "is this address
+ * registered?".
+ */
+{
+  const envFile = read('src/env/server.ts');
+  const staffPw = stripComments(read('src/server/auth/staff-password-signup.ts'));
+  const patientPw = stripComments(read('src/server/portal/password-signup.ts'));
+  const signupActions = stripComments(read('src/server/actions/signup.ts'));
+  const portalActions = stripComments(read('src/server/actions/portal.ts'));
+  const staffCallback = stripComments(read('src/app/auth/google/callback/route.ts'));
+  const portalGoogle = stripComments(read('src/server/portal/google.ts'));
+
+  check(
+    'Password sign-up',
+    'both password sign-up switches are off by default',
+    /STAFF_PASSWORD_SIGNUP: booleanish\.default\(false\)/.test(envFile) &&
+      /PORTAL_PASSWORD_SIGNUP: booleanish\.default\(false\)/.test(envFile),
+  );
+
+  /* Signing in straight away would make "account created" and "address taken" look different. */
+  check(
+    'Password sign-up',
+    'a password sign-up never creates a session',
+    staffPw.length > 0 &&
+      patientPw.length > 0 &&
+      !/createSession|createPatientSession|setPortalCookie|sessionCookieName/.test(
+        staffPw + patientPw,
+      ),
+  );
+
+  /* scrypt dominates the cost; skipping it for a taken address would answer by timing. */
+  const hashesFirst = (source, lookup) => {
+    const hashAt = source.indexOf('hashPassword(');
+    const lookupAt = source.indexOf(lookup);
+    return hashAt !== -1 && lookupAt !== -1 && hashAt < lookupAt;
+  };
+  check(
+    'Password sign-up',
+    'the password is hashed before the address is looked up',
+    hashesFirst(staffPw, '.from(userAccount)') &&
+      hashesFirst(patientPw, '.from(patientAccount)'),
+  );
+
+  /* "Create an account" must never become "set the password of any account". */
+  check(
+    'Password sign-up',
+    'a taken address is never overwritten',
+    !/\.update\(/.test(staffPw) && !/\.update\(/.test(patientPw),
+  );
+
+  check(
+    'Password sign-up',
+    'a password staff sign-up grants no roles',
+    /insert\(userAccount\)/.test(staffPw) && !/userRole|roleId/.test(staffPw),
+  );
+
+  check(
+    'Password sign-up',
+    'a password patient sign-up never searches existing patients',
+    /insert\(patient\)/.test(patientPw) && !/\.from\(patient\)/.test(patientPw),
+  );
+
+  /*
+   * One outcome per valid submission. Between the create call and the redirect there is no
+   * branch on the result, so the page cannot say whether an account was made.
+   */
+  const noBranch = (source, create, target) => {
+    const from = source.indexOf(create);
+    const to = source.indexOf(target, from);
+    return (
+      from !== -1 &&
+      to !== -1 &&
+      !/\bif\s*\(|\?\s*redirect|return\s*\{/.test(source.slice(from, to))
+    );
+  };
+  check(
+    'Password sign-up',
+    'every valid submission gets the same response',
+    noBranch(
+      signupActions,
+      'requestStaffAccessWithPassword(',
+      "redirect('/login?registered=1')",
+    ) &&
+      noBranch(
+        portalActions,
+        'registerPatientWithPassword(',
+        "redirect('/portal/login?registered=1')",
+      ),
+  );
+
+  /*
+   * The pre-hijack guard. Without it, registering a victim's address and waiting for them to
+   * "Continue with Google" would put the registrant — who knows the password — in the
+   * victim's account.
+   */
+  check(
+    'Password sign-up',
+    'Google never links by email to a self-registered account',
+    /!linked && account && 'selfRegisteredAt' in account && account\.selfRegisteredAt/.test(
+      staffCallback,
+    ) && /if \(!link && account\.selfRegisteredAt\)/.test(portalGoogle),
+  );
+}
+
 /* --------------------------------------------------------------- report */
 
 /*

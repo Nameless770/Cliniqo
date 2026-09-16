@@ -101,6 +101,8 @@ export async function startApp(): Promise<RunningApp> {
     SIGNUP_CLINIC_ID: E2E_CLINIC_ID,
     STAFF_SELF_SIGNUP: 'true',
     PORTAL_SELF_SIGNUP: 'true',
+    STAFF_PASSWORD_SIGNUP: 'true',
+    PORTAL_PASSWORD_SIGNUP: 'true',
     DATABASE_URL: withDatabase(required('DATABASE_URL'), TEST_DB),
     DATABASE_MIGRATION_URL: withDatabase(required('DATABASE_MIGRATION_URL'), TEST_DB),
     /* The journeys assert on triage behaviour, and they must assert on the engine that

@@ -631,9 +631,18 @@ describe('self-registration', () => {
       'pending-signup',
     );
 
-  it('never shows a sign-up page to someone who did not come from Google', async () => {
-    expect((await visitor().get('/signup')).url).toContain('/login');
-    expect((await visitor().get('/portal/signup')).url).toContain('/portal/login');
+  it('never shows the Google confirmation step to someone who did not come from Google', async () => {
+    /*
+     * Without a token the sign-up pages show "Create an account" — never the step that
+     * names a Google identity and offers to create an account for it.
+     */
+    const staff = await visitor().get('/signup');
+    expect(text(staff.html)).toMatch(/create a staff account/i);
+    expect(text(staff.html)).not.toMatch(/no staff account uses/i);
+
+    const portal = await visitor().get('/portal/signup');
+    expect(text(portal.html)).toMatch(/create your account/i);
+    expect(text(portal.html)).not.toMatch(/signing in as/i);
   });
 
   it('refuses a token signed with anything but the server secret', async () => {
@@ -648,7 +657,9 @@ describe('self-registration', () => {
       ),
     );
     const page = await session.get('/portal/signup');
-    expect(page.url).toContain('/portal/login');
+    /* The forged identity is never offered an account: only the ordinary form is shown. */
+    expect(page.html).not.toContain('forged-');
+    expect(text(page.html)).not.toMatch(/signing in as/i);
   });
 
   it('refuses a staff token on the patient sign-up page', async () => {
@@ -658,7 +669,9 @@ describe('self-registration', () => {
       'cliniqo_portal_signup',
       mint('staff', `crossed-${randomUUID()}@e2e.local`),
     );
-    expect((await session.get('/portal/signup')).url).toContain('/portal/login');
+    const page = await session.get('/portal/signup');
+    expect(page.html).not.toContain('crossed-');
+    expect(text(page.html)).not.toMatch(/signing in as/i);
   });
 
   it('lets a new staff member request access, and gives them nothing', async () => {
@@ -1117,5 +1130,161 @@ describe('visit notes in the portal', () => {
      */
     expect(held.html).not.toMatch(/release to patient portal/i);
     expect(visible.html).not.toMatch(/hide from patient portal/i);
+  });
+});
+
+/* ------------------------------------------------------------ password sign-up */
+
+describe('creating an account with an email and password', () => {
+  /* Same neutral words on the sign-in page whether or not an account was created. */
+  const NEUTRAL = /now sign in with the email and password you chose/i;
+
+  it('offers "Create an account" on both sign-in pages', async () => {
+    const staff = await visitor().get('/login');
+    expect(staff.html).toContain('href="/signup"');
+    expect(text(staff.html)).toMatch(/create an account/i);
+
+    const portal = await visitor().get('/portal/login');
+    expect(portal.html).toContain('href="/portal/signup"');
+  });
+
+  it('lets a new staff member create an account, sign in, and see nothing yet', async () => {
+    const email = `pw-staff-${randomUUID()}@e2e.local`;
+    const session = visitor();
+
+    const form = await session.get('/signup');
+    const landed = await session.submit(form, 'name="confirm"', {
+      fullName: 'E2E Password Applicant',
+      email,
+      password: 'a long enough e2e passphrase',
+      confirm: 'a long enough e2e passphrase',
+    });
+    expect(landed.url).toContain('/login');
+    expect(text(landed.html)).toMatch(NEUTRAL);
+
+    /* No session was handed out by the sign-up itself. */
+    expect((await session.get('/dashboard')).url).toContain('/login');
+
+    const signedIn = await session.submit(landed, 'name="email"', {
+      email,
+      password: 'a long enough e2e passphrase',
+    });
+    expect(signedIn.url).toContain('/dashboard');
+    expect(text(signedIn.html)).toMatch(/waiting for an administrator/i);
+
+    /* Still no access to anything, by each page's own guard. */
+    expect((await session.get('/patients')).url).not.toContain('/patients');
+
+    /* And the administrator is warned the address was never confirmed. */
+    const admin = visitor();
+    await signIn(admin, '/login', cast.adminEmail);
+    const staffPage = await admin.get('/staff');
+    expect(text(staffPage.html)).toMatch(/email not confirmed/i);
+  });
+
+  it('answers a taken staff address exactly the same, and changes nothing', async () => {
+    /* The seeded administrator's address, with a password the "attacker" chooses. */
+    const session = visitor();
+    const form = await session.get('/signup');
+    const landed = await session.submit(form, 'name="confirm"', {
+      fullName: 'Not The Administrator',
+      email: cast.adminEmail,
+      password: 'an attacker chosen passphrase',
+      confirm: 'an attacker chosen passphrase',
+    });
+    expect(landed.url).toContain('/login');
+    expect(text(landed.html)).toMatch(NEUTRAL);
+    expect(text(landed.html)).not.toMatch(/already registered|already exists|taken/i);
+
+    /* The attacker's password does not open the account… */
+    const attempt = await session.submit(landed, 'name="email"', {
+      email: cast.adminEmail,
+      password: 'an attacker chosen passphrase',
+    });
+    expect(attempt.url).not.toContain('/dashboard');
+
+    /* …and the real password still does. */
+    const owner = visitor();
+    expect((await signIn(owner, '/login', cast.adminEmail)).url).toContain('/dashboard');
+  });
+
+  it('lets a new patient create an account, as a new record, and sign in', async () => {
+    const email = `pw-patient-${randomUUID()}@e2e.local`;
+    const session = visitor();
+
+    const form = await session.get('/portal/signup');
+    expect(text(form.html)).toMatch(/does not connect you to your existing records/i);
+
+    const landed = await session.submit(form, 'name="confirm"', {
+      legalFirstName: 'Ada',
+      legalLastName: 'Tester',
+      dateOfBirth: '1990-01-01',
+      phonePrimary: '',
+      email,
+      password: 'a long enough e2e passphrase',
+      confirm: 'a long enough e2e passphrase',
+    });
+    expect(landed.url).toContain('/portal/login');
+    expect(text(landed.html)).toMatch(NEUTRAL);
+
+    const signedIn = await session.submit(landed, 'name="email"', {
+      email,
+      password: 'a long enough e2e passphrase',
+    });
+    expect(signedIn.url).toMatch(/\/portal$/);
+
+    /* Same name and birthday as the seeded Ada — and still a record of its own. */
+    const record = await appPool.query<{ patient_id: string }>(
+      `SELECT patient_id FROM patient_account WHERE email = $1`,
+      [email],
+    );
+    expect(record.rows[0]!.patient_id).not.toBe(cast.patientId);
+  });
+
+  it('answers a taken patient address exactly the same, and changes nothing', async () => {
+    const session = visitor();
+    const form = await session.get('/portal/signup');
+    const landed = await session.submit(form, 'name="confirm"', {
+      legalFirstName: 'Someone',
+      legalLastName: 'Else',
+      dateOfBirth: '1991-02-03',
+      phonePrimary: '',
+      email: cast.patientEmail,
+      password: 'an attacker chosen passphrase',
+      confirm: 'an attacker chosen passphrase',
+    });
+    expect(landed.url).toContain('/portal/login');
+    expect(text(landed.html)).toMatch(NEUTRAL);
+    expect(text(landed.html)).not.toMatch(/already registered|already exists|taken/i);
+
+    const attempt = await session.submit(landed, 'name="email"', {
+      email: cast.patientEmail,
+      password: 'an attacker chosen passphrase',
+    });
+    expect(attempt.url).not.toMatch(/\/portal$/);
+
+    const owner = visitor();
+    expect((await signIn(owner, '/portal/login', cast.patientEmail)).url).toMatch(
+      /\/portal$/,
+    );
+  });
+
+  it('answers a form mistake on the page, without creating anything', async () => {
+    const email = `pw-short-${randomUUID()}@e2e.local`;
+    const session = visitor();
+    const form = await session.get('/signup');
+    const result = await session.submit(form, 'name="confirm"', {
+      fullName: 'Short Password',
+      email,
+      password: 'short',
+      confirm: 'short',
+    });
+    expect(result.url).toContain('/signup');
+    expect(text(result.html)).toMatch(/at least 12 characters/i);
+
+    const rows = await appPool.query(`SELECT 1 FROM user_account WHERE email = $1`, [
+      email,
+    ]);
+    expect(rows.rowCount).toBe(0);
   });
 });
