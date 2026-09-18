@@ -22,8 +22,12 @@ import { requirePatientSession } from './session';
  */
 
 const MAX_MESSAGE_CHARS = 2000;
-/** Enough for context, short enough that a third-party prompt stays small. */
-const HISTORY_TURNS = 10;
+/**
+ * Enough for a whole conversation. The built-in engine re-reads the thread every turn to
+ * know what it has already asked, so a short window would make it ask again. A third-party
+ * engine trims this further itself, to keep its prompt small.
+ */
+const HISTORY_TURNS = 60;
 
 export type TriageMessageView = {
   id: string;
@@ -109,8 +113,8 @@ export type SendTriageResult =
       ok: true;
       conversationId: string;
       reply: string;
-      urgency: TriageUrgency;
-      specialty: string;
+      urgency: TriageUrgency | null;
+      specialty: string | null;
       /** Set when the emergency path fired — the UI renders it as an alert, not a chat turn. */
       redFlagCode: string | null;
     }
@@ -150,13 +154,19 @@ export async function sendTriageMessage(
     async (
       tx,
     ): Promise<
-      { ok: true; id: string; history: TriageTurn[] } | { ok: false; reason: 'not_found' | 'closed' }
+      | { ok: true; id: string; history: TriageTurn[]; alreadyEmergency: boolean }
+      | { ok: false; reason: 'not_found' | 'closed' }
     > => {
       let id = conversationId;
+      let alreadyEmergency = false;
 
       if (id) {
         const [existing] = await tx
-          .select({ id: triageConversation.id, status: triageConversation.status })
+          .select({
+            id: triageConversation.id,
+            status: triageConversation.status,
+            urgency: triageConversation.urgency,
+          })
           .from(triageConversation)
           .where(
             and(
@@ -171,6 +181,7 @@ export async function sendTriageMessage(
 
         if (!existing) return { ok: false, reason: 'not_found' };
         if (existing.status === 'closed') return { ok: false, reason: 'closed' };
+        alreadyEmergency = existing.urgency === 'emergency';
       } else {
         const [created] = await tx
           .insert(triageConversation)
@@ -217,7 +228,7 @@ export async function sendTriageMessage(
         metadata: { via: 'portal', role: 'patient', chars: message.length },
       });
 
-      return { ok: true, id, history: history.reverse() };
+      return { ok: true, id, history: history.reverse(), alreadyEmergency };
     },
   );
 
@@ -226,7 +237,11 @@ export async function sendTriageMessage(
   /* ------------------------------------------- 2. assessment, no transaction held */
   let assessment;
   try {
-    assessment = await assessSymptoms({ message, history: opened.history });
+    assessment = await assessSymptoms({
+      message,
+      history: opened.history,
+      alreadyEmergency: opened.alreadyEmergency,
+    });
   } catch {
     /* The upstream error is deliberately not surfaced or logged: its body can echo the
        request, which is the patient's symptom text. */

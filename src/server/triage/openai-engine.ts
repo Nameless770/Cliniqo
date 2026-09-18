@@ -99,7 +99,8 @@ export class OpenAiTriageEngine implements TriageEngine {
   async assess(request: TriageRequest): Promise<TriageResult> {
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
-      ...request.history.map((turn) => ({
+      // The last ten turns only: the whole thread is for the built-in engine's bookkeeping.
+      ...request.history.slice(-10).map((turn) => ({
         role: turn.role === 'patient' ? 'user' : 'assistant',
         content: turn.body,
       })),

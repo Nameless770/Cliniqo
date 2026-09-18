@@ -44,13 +44,16 @@ export default async function AssistantPage() {
             maxWidth: '34em',
           }}
         >
-          Describe what is bothering you and this will suggest which of our services to
-          book. It is automated — <strong>it is not a diagnosis, and no clinician has read
-          it</strong>. If you are worried, book an appointment anyway.
+          Chat with our automated assistant. It asks a few questions about what is
+          bothering you and suggests which of our services to book. It is automated —{' '}
+          <strong>it is not a diagnosis, and no clinician has read it</strong>. If you are
+          worried, book an appointment anyway.
         </p>
       </div>
 
       <AssistantChat
+        /* A new conversation is a fresh component, so "start a new conversation" resets. */
+        key={conversation?.id ?? 'none'}
         conversationId={conversation?.id ?? null}
         turns={conversation?.messages ?? []}
         urgency={conversation?.urgency ?? null}

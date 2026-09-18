@@ -53,7 +53,9 @@ export const triageConversation = pgTable(
     recommendedSpecialty: text('recommended_specialty'),
 
     /**
-     * What produced the recommendation: 'local' for the in-process engine, or
+     * What produced the recommendation: 'local' or 'local:2' for the in-process engine
+     * (the one-message matcher and the conversation, respectively), 'red-flag' for the
+     * emergency check, or
      * 'openai:<model>' when a third-party model was configured. Not nullable — a
      * conversation whose author is unknown cannot be reviewed.
      */

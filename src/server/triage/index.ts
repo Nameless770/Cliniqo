@@ -54,6 +54,9 @@ export function __setTriageEngine(engine: TriageEngine | null): void {
   cached = engine;
 }
 
+const STILL_AN_EMERGENCY =
+  'What you described earlier needs help straight away. Please do not wait for an appointment: call your local emergency number or crisis line now, or go to your nearest emergency department. If you wrote that by mistake, start a new conversation.';
+
 export type Assessment = TriageResult & {
   /** Set when the emergency path fired. The UI renders this very differently. */
   redFlagCode: string | null;
@@ -80,6 +83,23 @@ export async function assessSymptoms(request: TriageRequest): Promise<Assessment
       specialty: 'General practice',
       engine: 'red-flag',
       redFlagCode: redFlag.code,
+    };
+  }
+
+  /*
+   * Once an emergency, an emergency for the rest of the conversation. Without this, the
+   * next message ("ok", "thanks") would be assessed on its own words, the stored urgency
+   * would drop back to routine, and both the patient's banner and the front desk's top
+   * row would disappear while the person may still be in danger. A patient who typed the
+   * alarm by mistake starts a new conversation; this one stays where staff will see it.
+   */
+  if (request.alreadyEmergency) {
+    return {
+      reply: STILL_AN_EMERGENCY,
+      urgency: 'emergency',
+      specialty: 'General practice',
+      engine: 'red-flag',
+      redFlagCode: null,
     };
   }
 

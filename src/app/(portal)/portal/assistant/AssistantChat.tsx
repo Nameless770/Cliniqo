@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui';
 import { portalTriageAction, type PortalTriageState } from '@/server/actions/portal';
@@ -34,7 +34,22 @@ export function AssistantChat({
     {},
   );
 
-  const isEmergency = urgency === 'emergency';
+  /*
+   * "Start a new conversation" only stops sending this conversation's id, so the next
+   * message opens a new one on the server. The old thread stays in the record, and in the
+   * front desk's queue, exactly as it was. The page keys this component on the
+   * conversation id, so once the new one exists this resets and shows it.
+   */
+  const [startingNew, setStartingNew] = useState(false);
+  const showThread = !startingNew;
+
+  /* Ready for the next answer: the textarea is re-mounted per turn, so focus it again. */
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (turns.length > 0 || startingNew) input.current?.focus();
+  }, [turns.length, startingNew]);
+
+  const isEmergency = showThread && urgency === 'emergency';
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-4)' }}>
@@ -63,7 +78,7 @@ export function AssistantChat({
         </div>
       ) : null}
 
-      {turns.length > 0 ? (
+      {showThread && turns.length > 0 ? (
         <ol
           style={{
             listStyle: 'none',
@@ -113,7 +128,7 @@ export function AssistantChat({
         </ol>
       ) : null}
 
-      {specialty && !isEmergency ? (
+      {showThread && specialty && !isEmergency ? (
         <p
           style={{
             margin: 0,
@@ -146,21 +161,36 @@ export function AssistantChat({
       ) : null}
 
       <form action={action} style={{ display: 'grid', gap: 'var(--space-2)' }}>
-        {conversationId ? (
+        {conversationId && showThread ? (
           <input type="hidden" name="conversationId" value={conversationId} />
         ) : null}
         <label htmlFor="message" style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' }}>
-          {turns.length === 0 ? 'What is going on?' : 'Anything else?'}
+          {turns.length === 0 || startingNew ? 'What is going on?' : 'Your reply'}
         </label>
         <textarea
           id="message"
           name="message"
-          rows={4}
+          ref={input}
+          rows={3}
           maxLength={2000}
           required
-          key={turns.length}
-          placeholder="For example: I have had a sore throat for four days and it hurts to swallow."
+          key={`${turns.length}-${startingNew}`}
+          placeholder={
+            turns.length === 0 || startingNew
+              ? 'For example: I have had a sore throat for four days and it hurts to swallow.'
+              : 'Type your answer'
+          }
           aria-describedby="message-hint"
+          onKeyDown={(event) => {
+            /* Enter sends, as in any chat; Shift+Enter is a new line. Not while an IME is
+               composing, where Enter confirms a character rather than the message. */
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              if (!pending && event.currentTarget.value.trim()) {
+                event.currentTarget.form?.requestSubmit();
+              }
+            }
+          }}
           style={{
             width: '100%',
             padding: 'var(--space-3)',
@@ -179,13 +209,22 @@ export function AssistantChat({
           </span>
         ) : null}
         <span id="message-hint" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          Do not include anything you would not want in your medical record — this is saved
-          to it.
+          Press Enter to send, Shift+Enter for a new line. Do not include anything you would
+          not want in your medical record — this is saved to it.
         </span>
-        <div>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <Button type="submit" variant="primary" loading={pending}>
             Send
           </Button>
+          {turns.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setStartingNew((v) => !v)}
+            >
+              {startingNew ? 'Back to this conversation' : 'Start a new conversation'}
+            </Button>
+          ) : null}
         </div>
       </form>
     </div>

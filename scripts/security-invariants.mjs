@@ -1019,7 +1019,40 @@ void randomUUID;
   check(
     'Symptom triage',
     'no symptom text in audit metadata',
-    !/metadata:\s*\{[^}]*(body|message|symptoms)\s*[,}]/.test(triageData),
+    !/metadata:\s*\{[^}]*\b(body|message|symptoms)\b\s*[,}]/.test(triageData),
+  );
+
+  /*
+   * Once an emergency, an emergency for the rest of the conversation. Otherwise "ok thanks"
+   * is assessed on its own words, the stored urgency drops to routine, and the banner and
+   * the front desk's top row disappear. The flag comes from the stored row (not the
+   * history window) and is checked before the engine can answer.
+   */
+  const stickyIndex = orchestrator.indexOf('if (request.alreadyEmergency)');
+  check(
+    'Symptom triage',
+    'an emergency stays an emergency for the rest of the conversation',
+    stickyIndex > 0 &&
+      stickyIndex < engineIndex &&
+      /alreadyEmergency = existing\.urgency === 'emergency'/.test(triageData) &&
+      /alreadyEmergency: opened\.alreadyEmergency/.test(triageData),
+  );
+
+  /*
+   * The built-in assistant is the configuration with no BAA behind it, so it must never
+   * reach the network, in any file it is made of.
+   */
+  const localEngine = [
+    'src/server/triage/local-engine.ts',
+    'src/server/triage/local-understanding.ts',
+  ]
+    .map((p) => stripComments(read(p)))
+    .join('\n');
+  check(
+    'Symptom triage',
+    'the built-in assistant makes no network call',
+    localEngine.length > 0 &&
+      !/\bfetch\(|https?:\/\/|\bimport\(|node:(http|https|net)/.test(localEngine),
   );
 }
 

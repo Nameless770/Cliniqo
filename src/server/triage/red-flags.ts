@@ -80,9 +80,13 @@ const PATTERNS: Pattern[] = [
     message:
       'Trouble breathing needs emergency care. Call your local emergency number now, or go to your nearest emergency department.',
     any: [
-      'cannot breathe',
-      'can not breathe',
-      'cant breathe',
+      /*
+       * "breath" rather than "breathe": the missing e is the commonest way this is typed
+       * on a phone, and the shorter phrase still matches the correct spelling.
+       */
+      'cannot breath',
+      'can not breath',
+      'cant breath',
       'struggling to breathe',
       'difficulty breathing',
       'short of breath',
@@ -235,6 +239,24 @@ function negatedAt(haystack: string, index: number): boolean {
 }
 
 /**
+ * Whether `phrase` occurs anywhere in `haystack` without being negated.
+ *
+ * Every occurrence, not the first: "no chest pain yesterday, but chest pain now" is
+ * negated once and positive once, and stopping at the first would miss the one that
+ * matters.
+ */
+export function includesUnnegated(haystack: string, phrase: string): boolean {
+  for (
+    let index = haystack.indexOf(phrase);
+    index >= 0;
+    index = haystack.indexOf(phrase, index + 1)
+  ) {
+    if (!negatedAt(haystack, index)) return true;
+  }
+  return false;
+}
+
+/**
  * The first red flag the text matches, or null.
  *
  * First rather than all: the patient gets one instruction, and a wall of emergency
@@ -246,8 +268,7 @@ export function detectRedFlag(text: string): RedFlag | null {
 
   for (const pattern of PATTERNS) {
     for (const phrase of pattern.any) {
-      const index = haystack.indexOf(phrase);
-      if (index >= 0 && !negatedAt(haystack, index)) {
+      if (includesUnnegated(haystack, phrase)) {
         return { code: pattern.code, message: pattern.message };
       }
     }

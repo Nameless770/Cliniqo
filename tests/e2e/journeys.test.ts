@@ -187,7 +187,7 @@ describe('a patient using the portal', () => {
       [cast.patientId],
     );
     expect(stored.rows[0].recommended_specialty).toBe('Dermatology');
-    expect(stored.rows[0].engine).toBe('local');
+    expect(stored.rows[0].engine).toBe('local:2');
   });
 
   it('short-circuits an emergency and does NOT offer to book', async () => {
@@ -260,6 +260,45 @@ describe('a patient using the portal', () => {
       expect(url).not.toContain(cast.patientId);
       expect(url).not.toContain(cast.patientEmail);
     }
+  });
+
+  it('holds a conversation in a new thread, typo and all, and ends with a suggestion', async () => {
+    const session = visitor();
+    await signIn(session, '/portal/login', cast.patientEmail);
+
+    /* An empty id is what "Start a new conversation" sends: the next message opens one. */
+    let page = await session.get('/portal/assistant');
+    page = await session.submit(page, 'name="message"', {
+      conversationId: '',
+      message: 'i have stomech pain',
+    });
+    expect(text(page.html)).toMatch(/how long has this been going on/i);
+    // A new thread: the earlier conversation about a rash is not on the page.
+    expect(text(page.html)).not.toMatch(/itchy rash/i);
+
+    for (const answer of ['3 days', '7', 'no']) {
+      page = await session.submit(page, 'name="message"', { message: answer });
+    }
+
+    const body = text(page.html);
+    expect(body).toMatch(/my suggestion:/i);
+    expect(body).toMatch(/for 3 days, rated 7 out of 10/i);
+    expect(body).toContain('Suggested service: Gastroenterology');
+
+    const stored = await appPool.query(
+      `SELECT c.recommended_specialty, c.urgency, c.engine,
+              (SELECT count(*)::int FROM triage_message m WHERE m.conversation_id = c.id) AS turns
+         FROM triage_conversation c
+        WHERE c.patient_id = $1
+        ORDER BY c.created_at DESC LIMIT 1`,
+      [cast.patientId],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      recommended_specialty: 'Gastroenterology',
+      urgency: 'urgent',
+      engine: 'local:2',
+      turns: 8,
+    });
   });
 });
 
