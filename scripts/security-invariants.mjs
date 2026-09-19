@@ -960,7 +960,63 @@ void randomUUID;
   check(
     'Symptom triage',
     'a red flag returns without reaching the engine',
-    /if\s*\(redFlag\)\s*\{[\s\S]{0,600}?return\s*\{/.test(orchestrator),
+    /if\s*\(current\)\s*return\s+emergency\(/.test(orchestrator) &&
+      orchestrator.indexOf('if (current) return emergency(') < engineIndex,
+  );
+
+  /*
+   * An emergency is a property of the CONVERSATION, not of the message that contained it.
+   * Assessing only the newest message let a patient who described chest pain and then
+   * mentioned a sore knee be answered "Orthopaedics, routine" — the ambulance instruction
+   * replaced, and the denormalised urgency the front desk books from overwritten with it.
+   */
+  check(
+    'Symptom triage',
+    'an earlier message in the conversation can still raise the emergency',
+    orchestrator.includes('request.history[i]') &&
+      /detectRedFlag\(turn\.body\)/.test(orchestrator),
+  );
+
+  /*
+   * Only ten turns are handed to the engine, so re-reading history cannot be what carries
+   * a flag raised on turn one. It has to outlive the window, which means the column.
+   */
+  check(
+    'Symptom triage',
+    'a standing red flag survives beyond the history window',
+    orchestrator.includes('standingRedFlagCode') &&
+      read('src/db/schema/triage.ts').includes("redFlagCode: text('red_flag_code')"),
+  );
+
+  /*
+   * A stored code that no longer matches a pattern — a conversation backfilled by
+   * migration 0026, or a phrase retired later — must still produce an emergency
+   * instruction. Resolving an unknown emergency code to "no emergency" would turn an edit
+   * to the pattern list into a silent downgrade of every conversation that matched it.
+   */
+  check(
+    'Symptom triage',
+    'an unrecognised red-flag code still yields an emergency instruction',
+    orchestrator.includes('GENERAL_EMERGENCY_MESSAGE') &&
+      /redFlagMessage\(code\)\s*\?\?\s*GENERAL_EMERGENCY_MESSAGE/.test(orchestrator),
+  );
+
+  /*
+   * Negation is scoped to its own clause. The earlier rule scanned a fixed window of
+   * preceding words for any negator, so "I have no appetite and chest pain" was read as a
+   * denial of chest pain and produced no instruction at all.
+   */
+  const redFlagSource = read('src/server/triage/red-flags.ts');
+  check(
+    'Symptom triage',
+    'negation is clause-scoped, not a fixed window of words',
+    redFlagSource.includes('NEGATION_MODIFIERS') &&
+      !/slice\(Math\.max\(0,\s*index\s*-\s*\d+\)/.test(redFlagSource),
+  );
+  check(
+    'Symptom triage',
+    'no conjunction is treated as a negation modifier',
+    !/NEGATION_MODIFIERS = new Set\(\[[^\]]*'(and|but|or)'/s.test(redFlagSource),
   );
 
   const envSource = read('src/env/server.ts');
@@ -1016,6 +1072,22 @@ void randomUUID;
    * lengths, roles and codes; a `body` or `message` value in there would be a second copy
    * of the chart under six-year retention.
    */
+  /*
+   * `urgency` is denormalised so the front desk can book without reading symptom text,
+   * which makes a plain overwrite a downgrade of the thing somebody acts on. Done in SQL
+   * so two messages arriving together cannot interleave a read and a write.
+   */
+  check(
+    'Symptom triage',
+    'a stored urgency can rise but never fall',
+    /urgency:\s*sql`least\(/.test(triageData),
+  );
+  check(
+    'Symptom triage',
+    'a raised red flag is never cleared by a later message',
+    /redFlagCode:\s*sql`coalesce\(/.test(triageData),
+  );
+
   check(
     'Symptom triage',
     'no symptom text in audit metadata',

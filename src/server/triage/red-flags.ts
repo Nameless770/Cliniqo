@@ -48,6 +48,62 @@ export type RedFlag = {
  */
 const NEGATORS = ['no', 'not', 'never', 'without', 'denies', 'deny', 'havent', 'hasnt'];
 
+/**
+ * The only words allowed to stand between a negator and the symptom it cancels.
+ *
+ * "no chest pain" and "no severe chest pain" are the same denial. "I have no appetite and
+ * chest pain" is NOT a denial of chest pain — the "no" was spent on appetite, and the
+ * chest pain is real and untreated.
+ *
+ * The earlier rule scanned the three preceding words for any negator and suppressed the
+ * flag if it found one, so every patient who mentioned something they did not have before
+ * something they did got silence instead of an ambulance. Measured against plain phrasings
+ * ("I have no energy, chest pain too") it swallowed the flag outright.
+ *
+ * So a negator now only counts when nothing of substance stands between it and the match.
+ * Walking back from the match, the first word that is not a modifier decides: a negator
+ * means the patient is ruling this out, and ANYTHING ELSE — a noun, a conjunction, a verb
+ * with its own object — means the negation belonged to another clause and the flag fires.
+ * Conjunctions are deliberately absent from this list: "and", "but" and "or" open a new
+ * clause, which is exactly the boundary being detected.
+ */
+const NEGATION_MODIFIERS = new Set([
+  'a',
+  'acute',
+  'am',
+  'an',
+  'any',
+  'bad',
+  'been',
+  'current',
+  'currently',
+  'felt',
+  'get',
+  'getting',
+  'had',
+  'has',
+  'have',
+  'i',
+  'in',
+  'is',
+  'much',
+  'my',
+  'new',
+  'of',
+  'obvious',
+  'other',
+  'real',
+  'really',
+  'serious',
+  'severe',
+  'significant',
+  'sudden',
+  'the',
+  'to',
+  'very',
+  'was',
+]);
+
 type Pattern = { code: string; message: string; any: string[] };
 
 /**
@@ -73,6 +129,10 @@ const PATTERNS: Pattern[] = [
       'heart attack',
       'pain in my left arm',
       'chest pain and sweating',
+      'chest is tight',
+      'chest feels tight',
+      'pressure on my chest',
+      'pain in the chest',
     ],
   },
   {
@@ -90,6 +150,11 @@ const PATTERNS: Pattern[] = [
       'gasping',
       'choking',
       'turning blue',
+      'trouble breathing',
+      'hard to breathe',
+      'cant catch my breath',
+      'cannot catch my breath',
+      'breathing is hard',
     ],
   },
   {
@@ -110,6 +175,15 @@ const PATTERNS: Pattern[] = [
       'worst headache of my life',
       'sudden severe headache',
       'thunderclap headache',
+      'having a stroke',
+      'think im having a stroke',
+      'cannot feel my left side',
+      'cannot feel my right side',
+      'cant feel my left side',
+      'cant feel my right side',
+      'cannot move one side',
+      'arm went numb',
+      'face went numb',
     ],
   },
   {
@@ -162,7 +236,16 @@ const PATTERNS: Pattern[] = [
     code: 'poisoning',
     message:
       'Call your local emergency number or your poisons helpline now, and take the packaging with you if you can.',
-    any: ['overdose', 'took too many', 'swallowed poison', 'drank bleach', 'poisoned'],
+    any: [
+      'overdose',
+      'took too many',
+      'taken too many',
+      'swallowed poison',
+      'drank bleach',
+      'poisoned',
+      'swallowed a whole bottle',
+      'took a whole bottle',
+    ],
   },
   {
     code: 'obstetric',
@@ -214,6 +297,12 @@ const PATTERNS: Pattern[] = [
       'hurt myself',
       'harm myself',
       'self harm',
+      'end it all',
+      'take my own life',
+      'better off dead',
+      'no reason to live',
+      'dont want to be here anymore',
+      'do not want to be alive',
     ],
   },
 ];
@@ -228,10 +317,26 @@ export function normalise(text: string): string {
     .trim();
 }
 
+/**
+ * Is the phrase at `index` something the patient is ruling out?
+ *
+ * Walks backwards from the match through modifiers only. The first word of substance
+ * settles it. There is no fixed lookback window: "no" is either attached to this symptom
+ * through nothing but adjectives, or it is attached to something else and irrelevant here.
+ * A window could only ever be wrong in one of two directions, and one of those directions
+ * is a missed emergency.
+ */
 function negatedAt(haystack: string, index: number): boolean {
-  const before = haystack.slice(Math.max(0, index - 24), index).trim().split(' ');
-  // Only the three words immediately before count — "no" ten words back is another clause.
-  return before.slice(-3).some((w) => NEGATORS.includes(w));
+  const before = haystack.slice(0, index).trim();
+  if (!before) return false;
+
+  const words = before.split(' ');
+  for (let i = words.length - 1; i >= 0; i -= 1) {
+    const word = words[i]!;
+    if (NEGATORS.includes(word)) return true;
+    if (!NEGATION_MODIFIERS.has(word)) return false;
+  }
+  return false;
 }
 
 /**
@@ -257,5 +362,29 @@ export function detectRedFlag(text: string): RedFlag | null {
 
 /** Every code this module can emit — used by the tests to assert full coverage. */
 export const RED_FLAG_CODES: readonly string[] = PATTERNS.map((p) => p.code);
+
+/**
+ * The instruction for a code that fired earlier in a conversation.
+ *
+ * A conversation remembers the code, not the sentence, so the sentence is looked up again
+ * when the flag is re-shown. That keeps one copy of the wording: editing a message here
+ * corrects every conversation still carrying that flag, rather than leaving the old text
+ * frozen in whichever rows happened to be written first.
+ */
+export function redFlagMessage(code: string): string | null {
+  return PATTERNS.find((p) => p.code === code)?.message ?? null;
+}
+
+/**
+ * The fallback when a stored code is not one this module currently emits.
+ *
+ * Reachable two ways: a conversation backfilled as 'legacy' by migration 0026, whose
+ * original code was never stored, and a code retired by a later edit to the list above.
+ * Both must still tell the patient to get help — resolving an unknown emergency code to
+ * "no emergency" would turn a retired pattern into a silent downgrade of every
+ * conversation that ever matched it.
+ */
+export const GENERAL_EMERGENCY_MESSAGE =
+  'Based on what you told us earlier, this needs emergency assessment. Call your local emergency number now, or go to your nearest emergency department.';
 
 export const EMERGENCY_URGENCY: TriageUrgency = 'emergency';

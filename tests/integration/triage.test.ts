@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { appPool, closePools, ownerPool, seedBaseline, type Baseline } from '../helpers/db';
+import {
+  appPool,
+  closePools,
+  ownerPool,
+  seedBaseline,
+  type Baseline,
+} from '../helpers/db';
 import { testDb } from '../helpers/actions';
 
 vi.mock('@/db/client', async () => {
@@ -126,6 +132,140 @@ describe('symptom triage', () => {
     expect(detectRedFlag('headache, denies shortness of breath')).toBeNull();
     // The positive case still fires, so the guard has not simply disabled the rule.
     expect(detectRedFlag('I have chest pain')?.code).toBe('cardiac');
+  });
+
+  it('scopes negation to its own clause, not to a window of words', () => {
+    /*
+     * The failure this pins was live: the rule scanned the three words before a match for
+     * any negator, so a patient listing what they did NOT have before what they DID have
+     * got no emergency instruction at all. These phrasings are ordinary — people describe
+     * symptoms by contrast — and every one of them returned null.
+     */
+    expect(detectRedFlag('I have no appetite and chest pain')?.code).toBe('cardiac');
+    expect(detectRedFlag('I have no energy, chest pain too')?.code).toBe('cardiac');
+    expect(detectRedFlag('no rash, but I am coughing up blood')?.code).toBe(
+      'haemorrhage',
+    );
+
+    /* And a real denial is still a denial, including with a modifier in the way. */
+    expect(detectRedFlag('no chest pain')).toBeNull();
+    expect(detectRedFlag('no severe chest pain')).toBeNull();
+    expect(detectRedFlag('I do not have chest pain')).toBeNull();
+    expect(detectRedFlag('denies shortness of breath')).toBeNull();
+  });
+
+  it('covers the words patients actually use for an emergency', () => {
+    /*
+     * Each of these produced NO emergency instruction before. They are not exotic: the
+     * breathing one is the exact wording of the instruction the module itself shows
+     * ("Trouble breathing needs emergency care"), which the list did not match.
+     */
+    const mustFire: [string, string][] = [
+      ['I have trouble breathing', 'breathing'],
+      ['my chest is tight', 'cardiac'],
+      ['I think I am having a stroke', 'stroke'],
+      ['I cannot feel my left side', 'stroke'],
+      ['I want to end it all', 'self_harm'],
+      ['I have taken too many pills', 'poisoning'],
+    ];
+    for (const [text, code] of mustFire) {
+      expect(detectRedFlag(text)?.code, text).toBe(code);
+    }
+  });
+
+  /* -------------------------------------------------- an emergency is never withdrawn */
+
+  it('does not let a later, calmer message retract an emergency', async () => {
+    const first = await sendTriageMessage(null, 'my chest hurts badly');
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.urgency).toBe('emergency');
+
+    /*
+     * The bug this pins: the second message was assessed on its own, so the engine
+     * answered "Orthopaedics, routine" and overwrote the conversation's urgency. The
+     * patient saw the ambulance instruction replaced by "a routine appointment is fine",
+     * and the front desk queue — which books from that column without reading the symptom
+     * text — lost the emergency entirely.
+     */
+    const second = await sendTriageMessage(
+      first.conversationId,
+      'my knee has been sore too',
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.urgency).toBe('emergency');
+    expect(second.redFlagCode).toBe('cardiac');
+
+    const stored = await appPool.query<{ urgency: string; red_flag_code: string }>(
+      'SELECT urgency, red_flag_code FROM triage_conversation WHERE id = $1',
+      [first.conversationId],
+    );
+    expect(stored.rows[0]!.urgency).toBe('emergency');
+    expect(stored.rows[0]!.red_flag_code).toBe('cardiac');
+  });
+
+  it('keeps the emergency after it scrolls out of the history window', async () => {
+    const started = await sendTriageMessage(null, 'I cannot breathe properly');
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.redFlagCode).toBe('breathing');
+
+    /*
+     * Only the last ten turns are handed to the engine, so re-reading the history cannot
+     * be what carries the flag. Twelve innocuous messages push the original clean out of
+     * that window; the flag has to be on the conversation row to survive.
+     */
+    let last = started;
+    for (let i = 0; i < 12; i += 1) {
+      const next = await sendTriageMessage(
+        started.conversationId,
+        `and my knee aches, day ${i}`,
+      );
+      expect(next.ok).toBe(true);
+      if (!next.ok) return;
+      last = next;
+    }
+
+    expect(last.urgency).toBe('emergency');
+    expect(last.redFlagCode).toBe('breathing');
+    expect(last.reply).toMatch(/emergency number|emergency department/i);
+  });
+
+  it('never lowers a stored urgency, red flag or not', async () => {
+    /* The engine says "urgent"; the follow-up says "routine". The column keeps "urgent" —
+       a denormalised field somebody books from must not drift downward on its own. */
+    __setTriageEngine({
+      name: 'fixed-urgent',
+      assess: () =>
+        Promise.resolve({
+          reply: 'ok',
+          urgency: 'urgent' as const,
+          specialty: 'Dermatology' as const,
+          engine: 'fixed-urgent',
+        }),
+    });
+    const first = await sendTriageMessage(null, 'a rash that is getting worse');
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    __setTriageEngine({
+      name: 'fixed-routine',
+      assess: () =>
+        Promise.resolve({
+          reply: 'ok',
+          urgency: 'routine' as const,
+          specialty: 'Dermatology' as const,
+          engine: 'fixed-routine',
+        }),
+    });
+    await sendTriageMessage(first.conversationId, 'it is a bit better today');
+
+    const stored = await appPool.query<{ urgency: string }>(
+      'SELECT urgency FROM triage_conversation WHERE id = $1',
+      [first.conversationId],
+    );
+    expect(stored.rows[0]!.urgency).toBe('urgent');
   });
 
   /* ------------------------------------------------------------------ scoping */

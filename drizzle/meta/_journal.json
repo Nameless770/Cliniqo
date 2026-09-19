@@ -183,6 +183,13 @@
       "when": 1789555745951,
       "tag": "0025_staff_totp",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789796738174,
+      "tag": "0026_triage_standing_red_flag",
+      "breakpoints": true
     }
   ]
 }

@@ -377,3 +377,50 @@ Nothing here requires redesign. The architecture held: the audited data-access l
 permission matrix, and the database-level guarantees all did their jobs, and two of the
 findings above (F6, F7) were found precisely because the structure made the exceptions
 visible.
+
+---
+
+## Third pass — 2026-09-19 — symptom triage
+
+The second pass recorded that the emergency check "cannot be overridden by a model" and
+found no new defect. That claim was true and also insufficient: nothing overrode the
+check, but the check itself missed emergencies, and the result it produced could be
+discarded one message later. Both were found by probing the detector with plain phrasings
+rather than by reading it — the code reads correctly, which is why two passes of reading
+had not caught either.
+
+**F22 — negation was scoped to a window of words, not to a clause.** `negatedAt` scanned
+the three words before a match for any negator and suppressed the red flag if it found
+one. So a patient listing what they did not have before what they did — "I have no
+appetite and chest pain", "I have no energy, chest pain too" — received no emergency
+instruction at all. Describing symptoms by contrast is ordinary phrasing, not an edge
+case. Negation is now scoped to its own clause: walking back from the match, the first
+word that is not a modifier decides, and a conjunction or a noun means the negation
+belonged elsewhere and the flag fires. Fixed.
+
+**F23 — an emergency could be withdrawn by the next message.** `assessSymptoms` assessed
+only the newest message, and the portal wrote its result over the conversation's `urgency`
+unconditionally. A patient who wrote "my chest hurts", was told to call an ambulance, and
+then added "my knee has been sore too" was answered _"a routine appointment is fine"_ —
+and the denormalised urgency the front desk books from, without reading the symptom text,
+was overwritten from `emergency` to `routine`. An emergency is now a property of the
+conversation: raised by the current message, by any message still in the history window,
+or by a flag standing on the row, and the stored urgency can rise but never fall. Fixed.
+
+**F24 — the detector missed common wordings.** Six plain phrasings produced nothing,
+including "I have trouble breathing" — the exact words of the instruction the module
+itself displays. Also missed: "my chest is tight", "I think I am having a stroke", "I
+cannot feel my left side", "I want to end it all", "I have taken too many pills". Added,
+with a test that names each one. Fixed.
+
+The general lesson is narrower than "test more". All three defects were invisible to
+reading and obvious to probing, because each one is a gap between what the code says and
+what a person would type. A safety list written in patients' words has to be checked
+against patients' words.
+
+`red_flag_code` on `triage_conversation` (migration 0026) is the durable half of F23: the
+engine is only ever shown ten turns, so a flag raised on turn one cannot be re-derived on
+turn twelve. It is set once and never cleared — only a clinician closing the conversation
+ends it. An unrecognised code, including the `legacy` value the migration backfills onto
+conversations that predate the column, still resolves to an emergency instruction rather
+than to silence.
