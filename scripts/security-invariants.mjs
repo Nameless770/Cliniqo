@@ -418,6 +418,53 @@ check(
         portalData.includes('actorPatientAccountId')),
   );
 }
+/*
+ * A `'use server'` module may export nothing but async functions.
+ *
+ * This is not style. A non-function export compiles, typechecks, passes eslint and passes
+ * an integration test that imports the module directly — then fails at render with "A
+ * 'use server' file can only export async functions, found object", taking the page down
+ * to its error boundary. It was caught here by driving the application, not by any check
+ * that existed, so it gets one.
+ */
+{
+  const actionFiles = readdirSync('src/server/actions', { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.ts'))
+    .map((e) => `src/server/actions/${e.name}`);
+
+  const offenders = [];
+  for (const file of actionFiles) {
+    const source = read(file);
+    if (!/^\s*'use server';/m.test(source)) continue;
+    for (const match of source.matchAll(
+      /^export\s+(?!type\b|async\s+function\b)(\w+)/gm,
+    )) {
+      offenders.push(`${file}: export ${match[1]}`);
+    }
+  }
+
+  check(
+    'Boundaries',
+    "a 'use server' module exports only async functions",
+    offenders.length === 0,
+    offenders.join(', '),
+  );
+}
+
+/*
+ * Patient search moved out of the URL. `?q=` carried whatever the front desk typed, which
+ * is a patient's name far more often than it is a clinic name — into browser history, the
+ * `Referer` of every outbound link, and any proxy log on the way.
+ */
+{
+  const searchPage = read('src/app/(staff)/patients/page.tsx');
+  check(
+    'Boundaries',
+    'the patient list takes no search term from the URL',
+    !searchPage.includes('searchParams') && !/\bq\b'?\]/.test(searchPage),
+  );
+}
+
 check(
   'Boundaries',
   'components cannot import server internals',
