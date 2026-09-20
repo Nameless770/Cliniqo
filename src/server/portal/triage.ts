@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
 import { triageConversation, triageMessage } from '@/db/schema';
@@ -154,10 +154,23 @@ export async function sendTriageMessage(
     async (
       tx,
     ): Promise<
-      | { ok: true; id: string; history: TriageTurn[]; alreadyEmergency: boolean }
+      | {
+          ok: true;
+          id: string;
+          history: TriageTurn[];
+          standingRedFlagCode: string | null;
+          alreadyEmergency: boolean;
+        }
       | { ok: false; reason: 'not_found' | 'closed' }
     > => {
       let id = conversationId;
+      /*
+       * Two readings of the same fact, and both are carried on purpose. The code says
+       * WHICH emergency and is set once; the urgency is the weaker signal that still
+       * holds for a row written before the column existed. Either one refuses a
+       * downgrade, so losing one of them cannot quietly re-open this hole.
+       */
+      let standingRedFlagCode: string | null = null;
       let alreadyEmergency = false;
 
       if (id) {
@@ -165,6 +178,7 @@ export async function sendTriageMessage(
           .select({
             id: triageConversation.id,
             status: triageConversation.status,
+            redFlagCode: triageConversation.redFlagCode,
             urgency: triageConversation.urgency,
           })
           .from(triageConversation)
@@ -181,6 +195,7 @@ export async function sendTriageMessage(
 
         if (!existing) return { ok: false, reason: 'not_found' };
         if (existing.status === 'closed') return { ok: false, reason: 'closed' };
+        standingRedFlagCode = existing.redFlagCode;
         alreadyEmergency = existing.urgency === 'emergency';
       } else {
         const [created] = await tx
@@ -228,7 +243,13 @@ export async function sendTriageMessage(
         metadata: { via: 'portal', role: 'patient', chars: message.length },
       });
 
-      return { ok: true, id, history: history.reverse(), alreadyEmergency };
+      return {
+        ok: true,
+        id,
+        history: history.reverse(),
+        standingRedFlagCode,
+        alreadyEmergency,
+      };
     },
   );
 
@@ -237,11 +258,10 @@ export async function sendTriageMessage(
   /* ------------------------------------------- 2. assessment, no transaction held */
   let assessment;
   try {
-    assessment = await assessSymptoms({
-      message,
-      history: opened.history,
-      alreadyEmergency: opened.alreadyEmergency,
-    });
+    assessment = await assessSymptoms(
+      { message, history: opened.history, alreadyEmergency: opened.alreadyEmergency },
+      { standingRedFlagCode: opened.standingRedFlagCode },
+    );
   } catch {
     /* The upstream error is deliberately not surfaced or logged: its body can echo the
        request, which is the patient's symptom text. */
@@ -256,12 +276,27 @@ export async function sendTriageMessage(
       body: assessment.reply,
     });
 
+    /*
+     * Urgency only ever RISES, and a red flag is written once.
+     *
+     * `urgency` is denormalised onto the conversation so the front desk can book without
+     * reading the symptom text, which makes an overwrite here a downgrade of the thing
+     * somebody acts on. A later, calmer message must not be able to retract an earlier
+     * emergency: the patient with chest pain who then mentions a sore knee still has
+     * chest pain.
+     *
+     * Done in SQL rather than by comparing a value read earlier, so two messages arriving
+     * together cannot interleave a read and a write and lose the higher urgency. LEAST
+     * works because `triage_urgency` is declared most-urgent-first, and it ignores NULL,
+     * so the first assessment on a fresh conversation still lands.
+     */
     await tx
       .update(triageConversation)
       .set({
-        urgency: assessment.urgency,
+        urgency: sql`least(${triageConversation.urgency}, ${assessment.urgency}::triage_urgency)`,
         recommendedSpecialty: assessment.specialty,
         engine: assessment.engine,
+        redFlagCode: sql`coalesce(${triageConversation.redFlagCode}, ${assessment.redFlagCode})`,
       })
       .where(eq(triageConversation.id, opened.id));
 
@@ -278,6 +313,7 @@ export async function sendTriageMessage(
         urgency: assessment.urgency,
         specialty: assessment.specialty,
         redFlag: assessment.redFlagCode,
+        redFlagStanding: assessment.redFlagStanding,
       },
     });
   });

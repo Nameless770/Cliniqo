@@ -1,59 +1,47 @@
 import Link from 'next/link';
 
-import { Badge, EmptyState, Table, TableContainer, Td, Th, Tr } from '@/components/ui';
 import { can } from '@/lib/permissions';
-import { patientSearchInput } from '@/lib/patient-schemas';
 import { guardPage } from '@/server/auth/authorize';
 import { searchPatients } from '@/server/data-access/patients';
 
+import { PatientSearch } from './PatientSearch';
+
 /**
- * Patient list — search and pagination.
+ * Patient list — the shell around the search.
  *
- * A Server Component. The rows never cross into a Client Component, so patient names are
- * rendered on the server and are not serialised into a client payload.
+ * A Server Component still: it holds the authorization gate and performs the FIRST search,
+ * so the roster is on screen in the initial response rather than after a round trip. The
+ * interactive part below it re-searches through a server action, which re-checks
+ * authorization itself rather than trusting that this page already did.
  *
- * Search state lives in the URL as `?q=` and `?page=`, which makes results linkable and
- * back-button-correct. Note what is NOT in the URL: no patient id, no date of birth, no
- * name — those would end up in browser history, proxy logs, and Referer headers.
- * A search term is a staff-typed query, not a patient identifier.
+ * NOTHING ABOUT THE SEARCH IS IN THE URL ANY MORE. It used to carry `?q=`, justified as a
+ * staff-typed query rather than a patient identifier. That reasoning holds for "diabetic
+ * clinic" and breaks for "Mohammed Hassan", which is what the box is used for: a name in a
+ * query string is a name in browser history, in the `Referer` of every outbound link from
+ * this page, and in any proxy log on the way. It is a POST body now. `page` went with it
+ * rather than staying behind — a page number is not PHI, but leaving a lone parameter
+ * would mean half a search in the URL and half in a form, and the next person to touch
+ * this would reasonably put the query back beside it.
+ *
+ * The cost of that is losing a linkable search result, which was worth less than it looks:
+ * the link only worked for someone holding `patient.read.identifying`, and it was a link
+ * that named a patient.
  */
 export const metadata = { title: 'Patients · Cliniqo' };
 export const dynamic = 'force-dynamic';
 
-function formatDob(iso: string): string {
-  return iso;
-}
-
-export default async function PatientsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function PatientsPage() {
   const session = await guardPage('patient.read.identifying');
-  const params = await searchParams;
 
-  const parsed = patientSearchInput.safeParse({
-    query: typeof params['q'] === 'string' ? params['q'] : '',
-    page: typeof params['page'] === 'string' ? params['page'] : 1,
-    includeArchived: params['archived'] === '1',
+  /* The opening roster: everyone, page one. Same audited path the action uses. */
+  const list = await searchPatients({
+    query: '',
+    page: 1,
+    pageSize: 25,
+    includeArchived: false,
   });
 
-  // A malformed query string is a bad request, not a crash: fall back to defaults.
-  const input = parsed.success
-    ? parsed.data
-    : { query: '', page: 1, pageSize: 25, includeArchived: false };
-
-  const list = await searchPatients(input);
   const mayCreate = can(session.permissions, 'patient.create');
-
-  const pageHref = (page: number) => {
-    const sp = new URLSearchParams();
-    if (input.query) sp.set('q', input.query);
-    if (input.includeArchived) sp.set('archived', '1');
-    if (page > 1) sp.set('page', String(page));
-    const qs = sp.toString();
-    return qs ? `/patients?${qs}` : '/patients';
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -66,21 +54,7 @@ export default async function PatientsPage({
           flexWrap: 'wrap',
         }}
       >
-        <div>
-          <h1 style={{ fontSize: 'var(--text-xl)', marginBottom: 'var(--space-1)' }}>
-            Patients
-          </h1>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 'var(--text-sm)',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            {list.total} {list.total === 1 ? 'record' : 'records'}
-            {input.includeArchived ? ' (including archived)' : ''}
-          </p>
-        </div>
+        <h1 style={{ fontSize: 'var(--text-xl)', margin: 0 }}>Patients</h1>
 
         {mayCreate ? (
           <Link
@@ -100,6 +74,7 @@ export default async function PatientsPage({
         ) : null}
       </div>
 
+<<<<<<< HEAD
       {/* GET, so the search is a normal navigation: linkable, bookmarkable, cacheable. */}
       <form
         method="get"
@@ -249,6 +224,20 @@ export default async function PatientsPage({
           ) : null}
         </>
       )}
+=======
+      <PatientSearch
+        initial={{
+          rows: list.rows,
+          total: list.total,
+          query: '',
+          includeArchived: false,
+          page: list.page,
+          pageCount: list.pageCount,
+        }}
+        /* Archived records are a deliberate lookup, not a default view. */
+        canSeeArchived={can(session.permissions, 'patient.read.identifying')}
+      />
+>>>>>>> 3c852be467e981a80984d439073d542361c5a397
     </div>
   );
 }
