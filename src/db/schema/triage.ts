@@ -61,6 +61,21 @@ export const triageConversation = pgTable(
      */
     engine: text('engine').notNull(),
 
+    /**
+     * The emergency this conversation raised, if it ever raised one. Set once; never
+     * cleared by anything a patient types afterwards.
+     *
+     * It is a column rather than a fact re-derived from the messages because the engine
+     * only ever sees the last ten turns. Without it, a patient who wrote "my chest hurts",
+     * was told to call an ambulance, and then kept typing would — on the eleventh turn —
+     * have the emergency scroll out of the window and be shown "a routine appointment is
+     * fine". The stored recommendation the front desk books from was overwritten too.
+     *
+     * A red flag is a property of the conversation, not of one message in it. Only a
+     * clinician closing the conversation ends it.
+     */
+    redFlagCode: text('red_flag_code'),
+
     ...timestamps(),
     ...softDelete(() => userAccount.id),
   },
