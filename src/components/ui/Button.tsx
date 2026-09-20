@@ -49,6 +49,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         styles[variant],
         styles[size],
         fullWidth ? styles.fullWidth : '',
+        /* The shared lift-and-press, on every button in the application rather than on the
+           ones somebody remembered to opt in. It is decoration only: globals.css removes it
+           for prefers-reduced-motion, and nothing here reads it. */
+        'cq-btn',
         className ?? '',
       ]
         .filter(Boolean)

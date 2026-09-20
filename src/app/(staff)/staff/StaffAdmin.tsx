@@ -237,6 +237,7 @@ export function StaffAdmin({ staff }: { staff: StaffView[] }) {
       ) : null}
 
       <ul
+        className="cq-stagger"
         style={{
           listStyle: 'none',
           margin: 0,

@@ -189,6 +189,7 @@ export default async function DashboardPage() {
           Today
         </h2>
         <div
+          className="cq-stagger"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))',
@@ -223,6 +224,7 @@ export default async function DashboardPage() {
           Clinic
         </h2>
         <div
+          className="cq-stagger"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))',
@@ -256,6 +258,7 @@ export default async function DashboardPage() {
           Needs attention
         </h2>
         <div
+          className="cq-stagger"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(10rem, 1fr))',

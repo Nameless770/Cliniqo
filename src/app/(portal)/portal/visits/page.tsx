@@ -137,6 +137,7 @@ export default async function PortalVisitsPage() {
         return (
           <article
             key={`visit-${index}`}
+            className="cq-rowin"
             style={{
               border: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-lg)',

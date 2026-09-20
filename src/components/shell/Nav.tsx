@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { navItemsFor } from '@/lib/roles';
@@ -24,6 +24,30 @@ const BADGE_MEANING: Record<string, string> = {
   '/break-glass': 'awaiting review',
   '/staff': 'waiting for a role',
 };
+
+/**
+ * A dot that appears while the page behind a nav item is still being fetched.
+ *
+ * Staff pages are dynamic and session-guarded, so a click on a cold link can wait on the
+ * server for a moment with nothing on screen changing. `useLinkStatus` reports that wait;
+ * it must be used inside a `<Link>`, which is why this is its own component.
+ *
+ * Always rendered and toggled by opacity, per the Next docs, so the sidebar never reflows
+ * when it appears. `aria-hidden`: it says nothing a screen reader is not already told when
+ * the new page lands, and an element that blinks in and out of the accessibility tree
+ * during navigation is noise. Decoration only — with JavaScript off it simply never shows.
+ */
+function NavPending() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden="true"
+      className={[styles.navPending, pending ? styles.navPendingOn : '']
+        .filter(Boolean)
+        .join(' ')}
+    />
+  );
+}
 
 export function Nav({
   permissions,
@@ -69,6 +93,7 @@ export function Nav({
                     </span>
                   </>
                 ) : null}
+                <NavPending />
               </Link>
             </li>
           );

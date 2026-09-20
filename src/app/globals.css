@@ -353,6 +353,161 @@ a.cq-btn {
   content: counter(cq-n);
 }
 
+/* --- A list arriving, one item after another --------------------------------------------- */
+
+/*
+ * One class on the container, nothing on the children.
+ *
+ * The alternative is an inline `animation-delay` per row, which means the server prints a
+ * style attribute for every item and the reduced-motion rule has to fight it. `nth-child`
+ * keeps the whole effect in this file, where deleting the section deletes the behaviour.
+ *
+ * It stops at the tenth child on purpose: a hundred-row table that takes two seconds to
+ * finish arriving is a hundred-row table you cannot read for two seconds. Everything past
+ * the tenth is simply there.
+ */
+.cq-stagger > * {
+  animation: cq-rowin 300ms ease backwards;
+}
+
+.cq-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.cq-stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.cq-stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.cq-stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.cq-stagger > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.cq-stagger > *:nth-child(6) {
+  animation-delay: 200ms;
+}
+.cq-stagger > *:nth-child(7) {
+  animation-delay: 240ms;
+}
+.cq-stagger > *:nth-child(8) {
+  animation-delay: 280ms;
+}
+.cq-stagger > *:nth-child(9) {
+  animation-delay: 320ms;
+}
+.cq-stagger > *:nth-child(n + 10) {
+  animation-delay: 360ms;
+}
+
+/* --- A card that answers the pointer ------------------------------------------------------ */
+
+.cq-lift {
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+}
+
+.cq-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -16px rgb(32 30 29 / 55%);
+}
+
+/* --- The assistant thread: a turn lands on its own side ----------------------------------- */
+
+@keyframes cq-say-you {
+  from {
+    opacity: 0;
+    transform: translate(10px, 4px);
+  }
+}
+
+@keyframes cq-say-bot {
+  from {
+    opacity: 0;
+    transform: translate(-10px, 4px);
+  }
+}
+
+/*
+ * Only the last exchange moves.
+ *
+ * The thread is server-rendered in full after every message, so animating every turn would
+ * replay the entire conversation each time — the patient's own history dancing back at them
+ * while they wait for an answer. `nth-last-child(-n + 2)` is exactly the message just sent
+ * and the reply to it.
+ */
+.cq-thread > li:nth-last-child(-n + 2).cq-said-you {
+  animation: cq-say-you 300ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+.cq-thread > li:nth-last-child(-n + 2).cq-said-bot {
+  /* Delayed by the length of the patient's own bubble, so the reply reads as a response. */
+  animation: cq-say-bot 300ms 110ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+/* --- Waiting for the assistant ------------------------------------------------------------ */
+
+@keyframes cq-typing {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.cq-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cq-typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: cq-typing 1.2s ease-in-out infinite;
+}
+
+.cq-typing i:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.cq-typing i:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+/* --- An alarm that asks for attention, then stops asking ---------------------------------- */
+
+@keyframes cq-alarm {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-danger-text) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/*
+ * Three rings, not an infinite loop. An emergency banner that pulses forever becomes
+ * wallpaper, and the person it is aimed at may be reading it while frightened. It draws
+ * the eye when it appears and then holds still so it can be read.
+ */
+.cq-alarm {
+  animation: cq-alarm 1.6s ease-out 3;
+}
+
 /* --- Everything interactive eases between states ------------------------------------------ */
 
 /*
@@ -375,7 +530,8 @@ a.cq-btn {
  */
 @media (prefers-reduced-motion: reduce) {
   .cq-btn:hover:not(:disabled),
-  .cq-btn:active:not(:disabled) {
+  .cq-btn:active:not(:disabled),
+  .cq-lift:hover {
     transform: none;
   }
 }

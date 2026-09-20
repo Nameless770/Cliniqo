@@ -566,6 +566,30 @@ describe('the motion layer', () => {
     expect(portal.html).toContain('class="cq-screen"');
   });
 
+  it('wraps the sign-in screens too, and marks up lists and chat turns for it', async () => {
+    /*
+     * These classes are decoration — every screen must be complete without them, which is
+     * why nothing here asserts behaviour. What it does assert is that the markup a rule in
+     * globals.css needs is actually emitted, since a renamed class fails silently: the page
+     * still works, it just stops moving, and no other test would notice.
+     */
+    const anonymous = visitor();
+    expect((await anonymous.get('/login')).html).toContain('class="cq-screen"');
+
+    const staff = visitor();
+    await signIn(staff, '/login', cast.adminEmail);
+    expect((await staff.get('/staff')).html).toContain('cq-stagger');
+    expect((await staff.get('/patients')).html).toContain('cq-stagger');
+
+    const patient = visitor();
+    await signIn(patient, '/portal/login', cast.patientEmail);
+    const assistant = await patient.get('/portal/assistant');
+    expect(assistant.html).toContain('cq-thread');
+    // Each side arrives from its own side of the thread.
+    expect(assistant.html).toContain('cq-said-you');
+    expect(assistant.html).toContain('cq-said-bot');
+  });
+
   it('counts the dashboard up in CSS, with the true figure beside every counter', async () => {
     const session = visitor();
     const page = await signIn(session, '/login', cast.adminEmail);

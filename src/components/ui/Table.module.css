@@ -80,6 +80,10 @@
   border-bottom: 0;
 }
 
+.row {
+  transition: background-color 140ms ease;
+}
+
 .row:hover {
   background: var(--bg-hover);
 }

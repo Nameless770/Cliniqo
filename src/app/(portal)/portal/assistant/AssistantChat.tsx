@@ -61,6 +61,8 @@ export function AssistantChat({
       {isEmergency ? (
         <div
           role="alert"
+          /* Three rings and then still, so it catches the eye without becoming wallpaper. */
+          className="cq-alarm"
           style={{
             border: '2px solid var(--status-danger-text)',
             background: 'var(--status-danger-bg)',
@@ -80,6 +82,7 @@ export function AssistantChat({
 
       {showThread && turns.length > 0 ? (
         <ol
+          className="cq-thread"
           style={{
             listStyle: 'none',
             margin: 0,
@@ -91,6 +94,7 @@ export function AssistantChat({
           {turns.map((turn) => (
             <li
               key={turn.id}
+              className={turn.role === 'patient' ? 'cq-said-you' : 'cq-said-bot'}
               style={{
                 display: 'grid',
                 gap: 'var(--space-1)',
@@ -126,6 +130,37 @@ export function AssistantChat({
             </li>
           ))}
         </ol>
+      ) : null}
+
+      {/*
+        The wait, shown where the answer will appear.
+        `aria-hidden`: the submit button is already `aria-busy` while this is up, so a
+        screen-reader user is told once, in words, rather than hearing three dots.
+      */}
+      {pending ? (
+        <p
+          aria-hidden="true"
+          style={{
+            margin: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-3) var(--space-4)',
+            width: 'fit-content',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--brand-soft)',
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--text-xs)',
+          }}
+        >
+          <span className="cq-typing">
+            <i />
+            <i />
+            <i />
+          </span>
+          Reading what you wrote
+        </p>
       ) : null}
 
       {showThread && specialty && !isEmergency ? (

@@ -87,6 +87,7 @@ export default async function TriagePage() {
         />
       ) : (
         <ul
+          className="cq-stagger"
           style={{
             listStyle: 'none',
             margin: 0,

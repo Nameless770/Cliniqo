@@ -13,6 +13,35 @@
   background: var(--bg-overlay);
 }
 
+/*
+ * The dialog settles in rather than appearing whole, so the eye follows it from the button
+ * that opened it. No fill mode on purpose: the transform must not be retained, or the
+ * dialog becomes the containing block for anything fixed inside it.
+ *
+ * Only the entrance is animated. A closing animation would need the element kept alive
+ * past `close()`, and a modal that lingers after you dismiss it is worse than an abrupt one.
+ */
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.dialog[open] {
+  animation: dialogIn 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dialog[open]::backdrop {
+  animation: backdropIn 200ms ease;
+}
+
 .wide {
   width: min(48rem, calc(100vw - var(--space-8)));
 }
