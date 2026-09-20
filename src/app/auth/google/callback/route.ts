@@ -186,12 +186,37 @@ export async function GET(request: NextRequest): Promise<Response> {
             clinicId: userAccount.clinicId,
             status: userAccount.status,
             lockedUntil: userAccount.lockedUntil,
+            selfRegisteredAt: userAccount.selfRegisteredAt,
           })
           .from(userAccount)
           .where(
             and(eq(userAccount.email, identity.email), isNull(userAccount.archivedAt)),
           )
           .limit(1);
+
+    /*
+     * ==========================================================================
+     * NEVER LINK BY EMAIL TO AN ACCOUNT SOMEONE REGISTERED THEMSELVES
+     * ==========================================================================
+     *
+     * An administrator typed the address on an account they created, so matching a verified
+     * Google address to it is sound. A self-registered account is different: with password
+     * sign-up on, the address was typed by whoever filled in the form, and nothing proved they
+     * own it. Linking by email would let someone register a colleague's address, wait for the
+     * colleague to "Continue with Google", and end up sharing an account with them — knowing
+     * its password. A self-registered account is reachable only through the Google identity
+     * it was created with (found above by subject) or its own password.
+     */
+    if (!linked && account && 'selfRegisteredAt' in account && account.selfRegisteredAt) {
+      await recordAttempt({
+        email: identity.email,
+        ip,
+        userId: account.id,
+        clinicId: account.clinicId,
+        succeeded: false,
+      });
+      return response(FAILURE);
+    }
 
     await recordAttempt({
       email: identity.email,

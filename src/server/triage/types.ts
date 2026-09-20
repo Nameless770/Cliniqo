@@ -70,14 +70,23 @@ export type TriageRequest = {
   message: string;
   /** Earlier turns, oldest first, so a follow-up question has its context. */
   history: TriageTurn[];
+  /**
+   * The conversation is already recorded as an emergency. Read from the stored row rather
+   * than from `history`, which is a window and can scroll the emergency out of it.
+   */
+  alreadyEmergency?: boolean;
 };
 
 export type TriageResult = {
   /** Shown to the patient verbatim. Short — a few sentences at most. */
   reply: string;
-  urgency: TriageUrgency;
-  specialty: Specialty;
-  /** 'local', or 'openai:<model>'. Recorded on the conversation row. */
+  /**
+   * Both null only while there is nothing to assess yet, such as after "hello". The
+   * conversation then reads "Not assessed" rather than a suggestion nobody made.
+   */
+  urgency: TriageUrgency | null;
+  specialty: Specialty | null;
+  /** 'local:2', 'red-flag', or 'openai:<model>'. Recorded on the conversation row. */
   engine: string;
 };
 

@@ -3,9 +3,10 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { staffSelfSignupInput } from '@/lib/signup-schemas';
+import { staffPasswordSignupInput, staffSelfSignupInput } from '@/lib/signup-schemas';
 import {
   clearPendingSignup,
+  passwordSignupClinicId,
   readPendingSignup,
   signupClinicId,
 } from '@/server/auth/pending-signup';
@@ -16,6 +17,7 @@ import {
   sessionCookieName,
   sessionCookieOptions,
 } from '@/server/auth/session';
+import { requestStaffAccessWithPassword } from '@/server/auth/staff-password-signup';
 import { createSelfRegisteredStaff } from '@/server/auth/staff-signup';
 
 export type SignupFormState = {
@@ -85,4 +87,63 @@ export async function requestStaffAccessAction(
     expires: result.expiresAt,
   });
   redirect('/dashboard');
+}
+
+/**
+ * Create a staff account with an email and a password.
+ *
+ * ONE OUTCOME for every valid submission: a redirect to the sign-in page with the same
+ * message, whether an account was created or the address was already taken. Saying "that
+ * email is already registered" would let anyone check which addresses belong to staff here.
+ * Only a form error (a short password, a missing name) is answered on this page, and that
+ * reveals nothing about any account.
+ *
+ * No session is created. The person signs in on the ordinary page, where the rate limit,
+ * lockout and second factor all apply exactly as they do to every other account.
+ */
+export async function createStaffAccountAction(
+  _prev: SignupFormState,
+  formData: FormData,
+): Promise<SignupFormState> {
+  const clinicId = passwordSignupClinicId('staff');
+  if (!clinicId) redirect('/login');
+
+  const parsed = staffPasswordSignupInput.safeParse({
+    email: formData.get('email') ?? '',
+    fullName: formData.get('fullName') ?? '',
+    password: formData.get('password') ?? '',
+    confirm: formData.get('confirm') ?? '',
+  });
+  if (!parsed.success) {
+    const errors: Record<string, string[]> = {};
+    for (const issue of parsed.error.issues) {
+      const key = String(issue.path[0] ?? 'form');
+      (errors[key] ??= []).push(issue.message);
+    }
+    return { errors };
+  }
+
+  const { ip: rawIp, userAgent } = await requestMeta();
+  const ip = safeInet(rawIp);
+
+  const verdict = await checkIpRateLimit(ip);
+  if (!verdict.allowed) {
+    return {
+      message: `Too many attempts. Try again in ${verdict.retryAfterMinutes} minutes.`,
+    };
+  }
+
+  const { email, fullName, password } = parsed.data;
+  const result = await requestStaffAccessWithPassword(
+    { email, fullName, password },
+    clinicId,
+    ip,
+    userAgent,
+  );
+
+  /* A taken address counts against the per-IP limit, which is what slows someone testing
+     addresses one after another. The page does not know which it was. */
+  await recordAttempt({ email, ip, succeeded: result.created });
+
+  redirect('/login?registered=1');
 }

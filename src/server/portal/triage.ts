@@ -22,8 +22,12 @@ import { requirePatientSession } from './session';
  */
 
 const MAX_MESSAGE_CHARS = 2000;
-/** Enough for context, short enough that a third-party prompt stays small. */
-const HISTORY_TURNS = 10;
+/**
+ * Enough for a whole conversation. The built-in engine re-reads the thread every turn to
+ * know what it has already asked, so a short window would make it ask again. A third-party
+ * engine trims this further itself, to keep its prompt small.
+ */
+const HISTORY_TURNS = 60;
 
 export type TriageMessageView = {
   id: string;
@@ -109,8 +113,8 @@ export type SendTriageResult =
       ok: true;
       conversationId: string;
       reply: string;
-      urgency: TriageUrgency;
-      specialty: string;
+      urgency: TriageUrgency | null;
+      specialty: string | null;
       /** Set when the emergency path fired — the UI renders it as an alert, not a chat turn. */
       redFlagCode: string | null;
     }
@@ -155,11 +159,19 @@ export async function sendTriageMessage(
           id: string;
           history: TriageTurn[];
           standingRedFlagCode: string | null;
+          alreadyEmergency: boolean;
         }
       | { ok: false; reason: 'not_found' | 'closed' }
     > => {
       let id = conversationId;
+      /*
+       * Two readings of the same fact, and both are carried on purpose. The code says
+       * WHICH emergency and is set once; the urgency is the weaker signal that still
+       * holds for a row written before the column existed. Either one refuses a
+       * downgrade, so losing one of them cannot quietly re-open this hole.
+       */
       let standingRedFlagCode: string | null = null;
+      let alreadyEmergency = false;
 
       if (id) {
         const [existing] = await tx
@@ -167,6 +179,7 @@ export async function sendTriageMessage(
             id: triageConversation.id,
             status: triageConversation.status,
             redFlagCode: triageConversation.redFlagCode,
+            urgency: triageConversation.urgency,
           })
           .from(triageConversation)
           .where(
@@ -183,6 +196,7 @@ export async function sendTriageMessage(
         if (!existing) return { ok: false, reason: 'not_found' };
         if (existing.status === 'closed') return { ok: false, reason: 'closed' };
         standingRedFlagCode = existing.redFlagCode;
+        alreadyEmergency = existing.urgency === 'emergency';
       } else {
         const [created] = await tx
           .insert(triageConversation)
@@ -229,7 +243,13 @@ export async function sendTriageMessage(
         metadata: { via: 'portal', role: 'patient', chars: message.length },
       });
 
-      return { ok: true, id, history: history.reverse(), standingRedFlagCode };
+      return {
+        ok: true,
+        id,
+        history: history.reverse(),
+        standingRedFlagCode,
+        alreadyEmergency,
+      };
     },
   );
 
@@ -239,7 +259,7 @@ export async function sendTriageMessage(
   let assessment;
   try {
     assessment = await assessSymptoms(
-      { message, history: opened.history },
+      { message, history: opened.history, alreadyEmergency: opened.alreadyEmergency },
       { standingRedFlagCode: opened.standingRedFlagCode },
     );
   } catch {

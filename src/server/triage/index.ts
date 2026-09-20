@@ -54,6 +54,9 @@ export function __setTriageEngine(engine: TriageEngine | null): void {
   cached = engine;
 }
 
+const STILL_AN_EMERGENCY =
+  'What you described earlier needs help straight away. Please do not wait for an appointment: call your local emergency number or crisis line now, or go to your nearest emergency department. If you wrote that by mistake, start a new conversation.';
+
 export type Assessment = TriageResult & {
   /** Set when the emergency path fired. The UI renders this very differently. */
   redFlagCode: string | null;
@@ -95,8 +98,15 @@ export async function assessSymptoms(
   request: TriageRequest,
   options: AssessOptions = {},
 ): Promise<Assessment> {
-  const emergency = (code: string, standing: boolean): Assessment => ({
-    reply: messageForCode(code),
+  /*
+   * A standing emergency is re-stated, not re-quoted.
+   *
+   * Repeating the full chest-pain instruction after every "ok" is noise, and noise is how
+   * a banner stops being read. The follow-up wording says the same thing once and tells
+   * someone who typed the alarm by mistake how to get out of it.
+   */
+  const emergency = (code: string | null, standing: boolean): Assessment => ({
+    reply: standing ? STILL_AN_EMERGENCY : messageForCode(code!),
     urgency: 'emergency',
     /*
      * A specialty is still recorded because the column is not nullable in practice for
@@ -109,7 +119,7 @@ export async function assessSymptoms(
     redFlagStanding: standing,
   });
 
-  /* This message first, so the freshest emergency is the one quoted back. */
+  /* This message first, so the freshest emergency is the one quoted back in full. */
   const current = detectRedFlag(request.message);
   if (current) return emergency(current.code, false);
 
@@ -121,8 +131,18 @@ export async function assessSymptoms(
     if (earlier) return emergency(earlier.code, true);
   }
 
-  /* Finally the standing flag, which survives beyond the history window. */
-  if (options.standingRedFlagCode) return emergency(options.standingRedFlagCode, true);
+  /*
+   * Finally a standing emergency the caller knows about, which is what survives beyond
+   * the ten-turn history window.
+   *
+   * Two inputs, deliberately. `standingRedFlagCode` comes from the conversation row and
+   * carries WHICH emergency, so the audit trail keeps naming it; `alreadyEmergency` is
+   * the weaker signal derived from the stored urgency, and covers a row whose code is
+   * unknown — a conversation that predates the column, or one whose urgency was set by
+   * some future path that does not write a code. Either is enough to refuse to downgrade.
+   */
+  const standingCode = options.standingRedFlagCode ?? null;
+  if (standingCode || request.alreadyEmergency) return emergency(standingCode, true);
 
   const result = await getTriageEngine().assess(request);
   return { ...result, redFlagCode: null, redFlagStanding: false };

@@ -74,6 +74,18 @@ export function signupClinicId(audience: SignupAudience): string | null {
 }
 
 /**
+ * The clinic an email-and-password sign-up joins, or null when that is off for this audience.
+ * A separate switch from the Google path: it is the weaker of the two, and a clinic may well
+ * want Google sign-up without it.
+ */
+export function passwordSignupClinicId(audience: SignupAudience): string | null {
+  const env = getEnv();
+  const enabled =
+    audience === 'staff' ? env.STAFF_PASSWORD_SIGNUP : env.PORTAL_PASSWORD_SIGNUP;
+  return enabled && env.SIGNUP_CLINIC_ID ? env.SIGNUP_CLINIC_ID : null;
+}
+
+/**
  * Only ever called with an identity whose email Google has VERIFIED — the callbacks check
  * `email_verified` before reaching the point where this is issued.
  */

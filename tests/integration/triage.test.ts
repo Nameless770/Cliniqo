@@ -119,6 +119,29 @@ describe('symptom triage', () => {
     expect(result.reply).toMatch(/emergency number/i);
   });
 
+  it('keeps an emergency conversation an emergency when the patient carries on', async () => {
+    /*
+     * "ok thanks" after an ambulance instruction must not be assessed on its own words:
+     * that would store "routine", and the banner and the front desk's top row would both
+     * vanish. Read from the stored row, so it holds however long the thread gets.
+     */
+    const first = await sendTriageMessage(null, 'I cant breathe and my chest hurts');
+    expect(first.ok && first.urgency).toBe('emergency');
+    if (!first.ok) return;
+
+    const second = await sendTriageMessage(first.conversationId, 'ok thanks');
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.urgency).toBe('emergency');
+    expect(second.reply).toMatch(/emergency number/i);
+
+    const row = await appPool.query(
+      `SELECT urgency FROM triage_conversation WHERE id = $1`,
+      [first.conversationId],
+    );
+    expect(row.rows[0].urgency).toBe('emergency');
+  });
+
   it('routes a person in crisis to a crisis line, never to a booking queue', async () => {
     const flag = detectRedFlag('i want to kill myself');
     expect(flag?.code).toBe('self_harm');
@@ -384,7 +407,7 @@ describe('symptom triage', () => {
       `SELECT engine, recommended_specialty, urgency FROM triage_conversation WHERE id = $1`,
       [result.conversationId],
     );
-    expect(row.rows[0].engine).toBe('local');
+    expect(row.rows[0].engine).toBe('local:2');
     expect(row.rows[0].recommended_specialty).toBe('Dermatology');
     expect(row.rows[0].urgency).toBe('routine');
   });

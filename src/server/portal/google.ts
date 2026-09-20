@@ -3,7 +3,7 @@ import 'server-only';
 import { and, eq, isNull } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
-import { patientAccount, patientIdentity } from '@/db/schema';
+import { patient, patientAccount, patientIdentity } from '@/db/schema';
 import { getEnv } from '@/env/server';
 import { writeAuditEvent } from '@/server/audit/log';
 import type { GoogleConfig, GoogleIdentity } from '@/server/auth/google';
@@ -150,12 +150,14 @@ export async function signInPatientWithGoogle(
     patientId: patientAccount.patientId,
     status: patientAccount.status,
     lockedUntil: patientAccount.lockedUntil,
+    selfRegisteredAt: patient.selfRegisteredAt,
   };
 
   const [account] = link
     ? await db
         .select(columns)
         .from(patientAccount)
+        .innerJoin(patient, eq(patient.id, patientAccount.patientId))
         .where(
           and(
             eq(patientAccount.id, link.patientAccountId),
@@ -166,6 +168,7 @@ export async function signInPatientWithGoogle(
     : await db
         .select(columns)
         .from(patientAccount)
+        .innerJoin(patient, eq(patient.id, patientAccount.patientId))
         .where(
           and(
             eq(patientAccount.email, identity.email),
@@ -179,6 +182,21 @@ export async function signInPatientWithGoogle(
    * that stops the page answering "is this person a patient here?".
    */
   if (!account) return { ok: false, reason: 'no_account' };
+
+  /*
+   * NEVER LINK BY EMAIL TO A SELF-REGISTERED RECORD.
+   *
+   * Staff typed the address on a portal account they issued, so a verified Google address
+   * matching it is sound. A patient who registered with a password typed their own address,
+   * and nothing proved they own it. Linking by email would let someone register a real
+   * patient's address, wait for that patient to "Continue with Google", and then read
+   * everything they do in the portal with the password they chose. A self-registered record
+   * is reachable only through its own linked Google subject (found above) or its password.
+   *
+   * `refused`, not `no_account`: the address is taken, so offering a Google sign-up here would
+   * only lead to a sign-up that cannot succeed.
+   */
+  if (!link && account.selfRegisteredAt) return { ok: false, reason: 'refused' };
 
   const now = new Date();
   const locked = account.lockedUntil !== null && account.lockedUntil > now;

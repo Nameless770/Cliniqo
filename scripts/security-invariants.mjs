@@ -1138,7 +1138,59 @@ void randomUUID;
   check(
     'Symptom triage',
     'no symptom text in audit metadata',
-    !/metadata:\s*\{[^}]*(body|message|symptoms)\s*[,}]/.test(triageData),
+    !/metadata:\s*\{[^}]*\b(body|message|symptoms)\b\s*[,}]/.test(triageData),
+  );
+
+  /*
+   * Once an emergency, an emergency for the rest of the conversation. Otherwise "ok thanks"
+   * is assessed on its own words, the stored urgency drops to routine, and the banner and
+   * the front desk's top row disappear. The flag comes from the stored row (not the
+   * history window) and is checked before the engine can answer.
+   */
+  const stickyIndex = orchestrator.indexOf(
+    'if (standingCode || request.alreadyEmergency)',
+  );
+  check(
+    'Symptom triage',
+    'an emergency stays an emergency for the rest of the conversation',
+    stickyIndex > 0 &&
+      stickyIndex < engineIndex &&
+      /alreadyEmergency = existing\.urgency === 'emergency'/.test(triageData) &&
+      /alreadyEmergency: opened\.alreadyEmergency/.test(triageData),
+  );
+
+  /*
+   * BOTH carriers of that fact, not either.
+   *
+   * The stored `red_flag_code` says WHICH emergency and survives the history window; the
+   * stored urgency is the weaker signal that still holds for a row written before that
+   * column existed. Two independent fixes for the same defect arrived from two branches,
+   * and keeping both is the point — either alone would re-open the hole if the other were
+   * refactored away, and neither is expensive.
+   */
+  check(
+    'Symptom triage',
+    'a standing emergency is carried by the code as well as the urgency',
+    /standingRedFlagCode = existing\.redFlagCode/.test(triageData) &&
+      /standingRedFlagCode: opened\.standingRedFlagCode/.test(triageData) &&
+      orchestrator.includes('options.standingRedFlagCode'),
+  );
+
+  /*
+   * The built-in assistant is the configuration with no BAA behind it, so it must never
+   * reach the network, in any file it is made of.
+   */
+  const localEngine = [
+    'src/server/triage/local-engine.ts',
+    'src/server/triage/local-understanding.ts',
+  ]
+    .map((p) => stripComments(read(p)))
+    .join('\n');
+  check(
+    'Symptom triage',
+    'the built-in assistant makes no network call',
+    localEngine.length > 0 &&
+      !/\bfetch\(|https?:\/\/|\bimport\(|node:(http|https|net)/.test(localEngine),
   );
 }
 
@@ -1981,6 +2033,114 @@ check(
           visibilityControl,
         )?.[0] ?? 'reason: x',
       ),
+  );
+}
+
+/* ---------------------------------------------------------- password sign-up */
+
+/*
+ * Email-and-password sign-up. Nothing proves the address, so every guarantee here is about
+ * making an unproven account harmless and making the form unable to answer "is this address
+ * registered?".
+ */
+{
+  const envFile = read('src/env/server.ts');
+  const staffPw = stripComments(read('src/server/auth/staff-password-signup.ts'));
+  const patientPw = stripComments(read('src/server/portal/password-signup.ts'));
+  const signupActions = stripComments(read('src/server/actions/signup.ts'));
+  const portalActions = stripComments(read('src/server/actions/portal.ts'));
+  const staffCallback = stripComments(read('src/app/auth/google/callback/route.ts'));
+  const portalGoogle = stripComments(read('src/server/portal/google.ts'));
+
+  check(
+    'Password sign-up',
+    'both password sign-up switches are off by default',
+    /STAFF_PASSWORD_SIGNUP: booleanish\.default\(false\)/.test(envFile) &&
+      /PORTAL_PASSWORD_SIGNUP: booleanish\.default\(false\)/.test(envFile),
+  );
+
+  /* Signing in straight away would make "account created" and "address taken" look different. */
+  check(
+    'Password sign-up',
+    'a password sign-up never creates a session',
+    staffPw.length > 0 &&
+      patientPw.length > 0 &&
+      !/createSession|createPatientSession|setPortalCookie|sessionCookieName/.test(
+        staffPw + patientPw,
+      ),
+  );
+
+  /* scrypt dominates the cost; skipping it for a taken address would answer by timing. */
+  const hashesFirst = (source, lookup) => {
+    const hashAt = source.indexOf('hashPassword(');
+    const lookupAt = source.indexOf(lookup);
+    return hashAt !== -1 && lookupAt !== -1 && hashAt < lookupAt;
+  };
+  check(
+    'Password sign-up',
+    'the password is hashed before the address is looked up',
+    hashesFirst(staffPw, '.from(userAccount)') &&
+      hashesFirst(patientPw, '.from(patientAccount)'),
+  );
+
+  /* "Create an account" must never become "set the password of any account". */
+  check(
+    'Password sign-up',
+    'a taken address is never overwritten',
+    !/\.update\(/.test(staffPw) && !/\.update\(/.test(patientPw),
+  );
+
+  check(
+    'Password sign-up',
+    'a password staff sign-up grants no roles',
+    /insert\(userAccount\)/.test(staffPw) && !/userRole|roleId/.test(staffPw),
+  );
+
+  check(
+    'Password sign-up',
+    'a password patient sign-up never searches existing patients',
+    /insert\(patient\)/.test(patientPw) && !/\.from\(patient\)/.test(patientPw),
+  );
+
+  /*
+   * One outcome per valid submission. Between the create call and the redirect there is no
+   * branch on the result, so the page cannot say whether an account was made.
+   */
+  const noBranch = (source, create, target) => {
+    const from = source.indexOf(create);
+    const to = source.indexOf(target, from);
+    return (
+      from !== -1 &&
+      to !== -1 &&
+      !/\bif\s*\(|\?\s*redirect|return\s*\{/.test(source.slice(from, to))
+    );
+  };
+  check(
+    'Password sign-up',
+    'every valid submission gets the same response',
+    noBranch(
+      signupActions,
+      'requestStaffAccessWithPassword(',
+      "redirect('/login?registered=1')",
+    ) &&
+      noBranch(
+        portalActions,
+        'registerPatientWithPassword(',
+        "redirect('/portal/login?registered=1')",
+      ),
+  );
+
+  /*
+   * The pre-hijack guard. Without it, registering a victim's address and waiting for them to
+   * "Continue with Google" would put the registrant — who knows the password — in the
+   * victim's account.
+   */
+  check(
+    'Password sign-up',
+    'Google never links by email to a self-registered account',
+    /!linked && account && 'selfRegisteredAt' in account && account\.selfRegisteredAt/.test(
+      staffCallback,
+    ) && /if \(!link && account\.selfRegisteredAt\)/.test(portalGoogle),
   );
 }
 

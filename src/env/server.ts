@@ -214,6 +214,30 @@ const schema = z
      * answer.
      */
     PORTAL_SELF_SIGNUP: booleanish.default(false),
+
+    /**
+     * Let people create an account with an email address and a password, from a
+     * "Create an account" page.
+     *
+     * OFF BY DEFAULT, one switch per audience, and weaker than the Google path in two ways
+     * that this application cannot fix without sending email — which needs a vendor with a
+     * Business Associate Agreement, and there is none yet:
+     *
+     *   The address is not proven. Anyone can type anyone's email. So a password sign-up
+     *   grants nothing on its own (staff: no roles; patients: a new, unverified record), it
+     *   never signs the person in, and Google sign-in refuses to link itself to such an
+     *   account by email — otherwise someone could register a victim's address, wait for the
+     *   victim to "Continue with Google", and share the account with them.
+     *
+     *   It can reveal that an address already has an account. The form answers every
+     *   submission identically and never says "already registered", but a person who then
+     *   cannot sign in with the password they just chose has learned the address was taken.
+     *   For PATIENTS that means learning someone is a patient here, which is health
+     *   information. Sign-in rate limits and account lockout slow that down; they do not
+     *   remove it. The Google path has neither weakness.
+     */
+    STAFF_PASSWORD_SIGNUP: booleanish.default(false),
+    PORTAL_PASSWORD_SIGNUP: booleanish.default(false),
   })
   /* --- Configuration coherence, every environment -------------------------- */
   .superRefine((env, ctx) => {
@@ -268,7 +292,13 @@ const schema = z
       });
     }
 
-    if ((env.STAFF_SELF_SIGNUP || env.PORTAL_SELF_SIGNUP) && !env.SIGNUP_CLINIC_ID) {
+    if (
+      (env.STAFF_SELF_SIGNUP ||
+        env.PORTAL_SELF_SIGNUP ||
+        env.STAFF_PASSWORD_SIGNUP ||
+        env.PORTAL_PASSWORD_SIGNUP) &&
+      !env.SIGNUP_CLINIC_ID
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['SIGNUP_CLINIC_ID'],
