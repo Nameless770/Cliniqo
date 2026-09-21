@@ -40,6 +40,18 @@ export type RunningApp = {
 };
 
 /**
+ * One build per process, however many servers are started from it.
+ *
+ * A second instance exists to run the SAME application under different configuration —
+ * the triage engine, say — and rebuilding for that would add a minute to the suite to
+ * produce identical output. They share `.next-e2e` and differ only in environment, which
+ * is also the honest shape of the thing under test: one build, configured two ways.
+ */
+let buildPromise: Promise<void> | null = null;
+/** Each instance gets its own port; 400 apart, clear of the first instance's range. */
+let instances = 0;
+
+/**
  * Boot the app and wait until it actually serves.
  *
  * A PRODUCTION build, served by `next start`, for three reasons:
@@ -58,9 +70,12 @@ export type RunningApp = {
  * Readiness is a successful request to the health endpoint, not a log line: the banner is
  * printed before the server is actually accepting requests.
  */
-export async function startApp(): Promise<RunningApp> {
+export async function startApp(
+  /** Environment for THIS instance, overriding the defaults below. */
+  overrides: Record<string, string> = {},
+): Promise<RunningApp> {
   // A port derived from the process id, so a parallel checkout does not collide.
-  const port = 3200 + (process.pid % 300);
+  const port = 3200 + (process.pid % 300) + instances++ * 400;
   const baseUrl = `http://127.0.0.1:${port}`;
 
   /*
@@ -109,13 +124,17 @@ export async function startApp(): Promise<RunningApp> {
        ships by default — never on a third party, which would make the suite both flaky
        and a PHI disclosure. */
     TRIAGE_ENGINE: 'local',
+    ...overrides,
   };
 
-  execFileSync(process.execPath, [nextBin, 'build'], {
-    cwd: process.cwd(),
-    env: { ...appEnv, NODE_ENV: 'production' },
-    stdio: 'pipe',
+  buildPromise ??= Promise.resolve().then(() => {
+    execFileSync(process.execPath, [nextBin, 'build'], {
+      cwd: process.cwd(),
+      env: { ...appEnv, NODE_ENV: 'production' },
+      stdio: 'pipe',
+    });
   });
+  await buildPromise;
 
   const child: ChildProcess = spawn(
     process.execPath,

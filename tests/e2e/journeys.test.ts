@@ -8,6 +8,7 @@ import { appPool, closePools } from '../helpers/db';
 import { BrowserSession, text } from './client';
 import { seedCast, PASSWORD, type Cast } from './seed';
 import { startApp, type RunningApp } from './server';
+import { startStubModel, type StubModel } from './stub-model';
 
 /**
  * End-to-end journeys.
@@ -1349,5 +1350,142 @@ describe('creating an account with an email and password', () => {
       email,
     ]);
     expect(rows.rowCount).toBe(0);
+  });
+});
+
+/* ----------------------------------------------- the assistant, answered by a model */
+
+/**
+ * The same application, configured with TRIAGE_ENGINE=model.
+ *
+ * A SECOND server on the same build, because this is configuration rather than code: the
+ * engine is chosen at boot from validated environment, and the only way to prove that the
+ * chain from `.env` through the factory, the guard and the fallback actually holds is to
+ * boot it that way and talk to it through the portal.
+ *
+ * The model is a stub on 127.0.0.1 (see stub-model.ts). Binding loopback is also part of
+ * what is under test: the same URL on any other host is a disclosure of PHI, and the app
+ * refuses to start without an acknowledged BAA.
+ */
+describe('a model answering in the portal', () => {
+  let stub: StubModel;
+  let modelApp: RunningApp;
+
+  beforeAll(async () => {
+    stub = await startStubModel();
+    modelApp = await startApp({
+      TRIAGE_ENGINE: 'model',
+      TRIAGE_MODEL_URL: `${stub.url}/v1/chat/completions`,
+      TRIAGE_MODEL_NAME: 'e2e-stub',
+    });
+  }, 180_000);
+
+  afterAll(async () => {
+    await modelApp?.stop();
+    await stub?.stop();
+  });
+
+  /** A signed-in patient opening a NEW thread — an empty id is what the button sends. */
+  async function firstMessage(message: string) {
+    const session = new BrowserSession(modelApp.baseUrl);
+    await signIn(session, '/portal/login', cast.patientEmail);
+    const page = await session.get('/portal/assistant');
+    return session.submit(page, 'name="message"', { conversationId: '', message });
+  }
+
+  async function latestConversation() {
+    const rows = await appPool.query<{
+      engine: string;
+      recommended_specialty: string | null;
+      urgency: string | null;
+    }>(
+      `SELECT engine, recommended_specialty, urgency
+         FROM triage_conversation
+        WHERE patient_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [cast.patientId],
+    );
+    return rows.rows[0]!;
+  }
+
+  it("shows the model's words, and the clinic's own routing", async () => {
+    stub.say('I am sorry to hear that. How long has your stomach been hurting?');
+    const page = await firstMessage('i have stomech pain');
+
+    const body = text(page.html);
+    expect(body).toContain('How long has your stomach been hurting?');
+    /*
+     * The service is the rules', not the model's. The model was never asked for one, and
+     * the front desk books from this line — so it must not be a sentence a model chose.
+     */
+    expect(body).toContain('Suggested service: Gastroenterology');
+
+    const stored = await latestConversation();
+    expect(stored.engine).toMatch(/^model:e2e-stub@127\.0\.0\.1:\d+\+local:2$/);
+    expect(stored.recommended_specialty).toBe('Gastroenterology');
+  });
+
+  it('never shows a patient a reply that names a medicine', async () => {
+    stub.say('Take 400 mg of ibuprofen twice a day and rest.');
+    const page = await firstMessage('my head hurts');
+
+    const body = text(page.html);
+    expect(body).not.toMatch(/ibuprofen/i);
+    expect(body).not.toMatch(/400\s?mg/i);
+    /* The built-in engine answered the turn instead, so the patient is not left waiting. */
+    expect(body).toMatch(/how long has this been going on/i);
+
+    const stored = await latestConversation();
+    expect(stored.engine).toMatch(/-refused-(medicine|dose)$/);
+  });
+
+  it('keeps answering when the model is down, and never echoes its error body', async () => {
+    stub.fail(500);
+    const page = await firstMessage('my knee hurts when i walk');
+
+    const body = text(page.html);
+    /* The stub's body echoes the request, as a real vendor's error does. */
+    expect(body).not.toMatch(/stub failure/i);
+    expect(body).toMatch(/how long has this been going on/i);
+
+    const stored = await latestConversation();
+    expect(stored.engine).toMatch(/^local:2-after-model:e2e-stub@/);
+    expect(stored.recommended_specialty).toBe('Orthopaedics');
+
+    stub.say('Thanks, tell me more.');
+  });
+
+  it('answers an emergency without consulting the model at all', async () => {
+    stub.say('You are fine, there is no need to worry about that.');
+    const callsBefore = stub.calls;
+
+    const page = await firstMessage('I have crushing chest pain and my left arm hurts');
+
+    const body = text(page.html);
+    expect(body).toMatch(/this may be an emergency/i);
+    expect(body).toMatch(/emergency number/i);
+    expect(body).not.toMatch(/you are fine/i);
+    /*
+     * The assertion this whole journey exists for. Not "the model's answer was ignored" —
+     * the model was never asked, so no configuration, outage or prompt of any kind can put
+     * a reassuring sentence in front of someone describing a heart attack.
+     */
+    expect(stub.calls).toBe(callsBefore);
+
+    const stored = await latestConversation();
+    expect(stored.engine).toBe('red-flag');
+    expect(stored.urgency).toBe('emergency');
+  });
+
+  it('sends the symptom text to the model, and nothing that identifies the patient', async () => {
+    stub.say('Thanks, tell me more.');
+    await firstMessage('my ear has been sore since tuesday');
+
+    const sent = JSON.stringify(stub.lastRequest).toLowerCase();
+    expect(sent).toContain('my ear has been sore since tuesday');
+    for (const identifier of [cast.patientId, cast.patientEmail, 'mrn', 'date_of_birth']) {
+      expect(sent).not.toContain(identifier.toLowerCase());
+    }
   });
 });
