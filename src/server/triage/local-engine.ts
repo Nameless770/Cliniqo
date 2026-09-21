@@ -50,6 +50,7 @@ const Q = {
   duration: 'How long has this been going on?',
   severity: 'How bad is it right now, from 1 (mild) to 10 (the worst you can imagine)?',
   which: 'Which ones? Tell me in your own words.',
+  where: 'Where is the pain — which part of your body?',
 } as const;
 
 type QuestionId = keyof typeof Q | 'details';
@@ -93,6 +94,13 @@ const ANSWERS = {
   diagnosis:
     'I cannot tell you what it is. Only a clinician can, after seeing you. What I can do is point you to the right service.',
   booking: 'You can book at any time with the link below this chat.',
+  /*
+   * Said rather than guessed. A model asked whether the clinic opens on Saturday answers
+   * confidently and wrongly, and a patient can act on that; this engine does not know
+   * either, and says so.
+   */
+  clinicInfo:
+    'I do not know the clinic’s opening hours, prices or phone number — reception can tell you, and the booking page shows the times you can choose from.',
   closing:
     'You are welcome. I hope you feel better soon. If it gets worse before your appointment, book an earlier one or call the clinic. If it ever feels like an emergency, call your local emergency number.',
   anythingElse: 'Is there anything else you want to tell me?',
@@ -104,6 +112,31 @@ const ANSWERS = {
 /* Varied a little so a run of answers does not read like a form, and chosen by position
    in the thread rather than at random so the same thread always gets the same words. */
 const THANKS = ['Thanks.', 'Got it, thank you.', 'Okay, thank you.'] as const;
+
+/*
+ * What to say once the suggestion is made and a message adds nothing new.
+ *
+ * Three different things, in order, because the first one said three times in a row —
+ * which is what this used to do — reads as a machine that has stopped listening, and the
+ * patient learns nothing from the second or third telling. The last one is the honest
+ * one: this engine cannot answer everything, and what it cannot answer is not lost,
+ * because a clinician reads the thread.
+ */
+const FALLBACKS: readonly ((rule: Rule) => string)[] = [
+  (rule) =>
+    `Thanks, I have noted that. My suggestion is still the same: ${rule.because} ${ANSWERS.anythingElse}`,
+  () =>
+    'I have written that down as well. If you can, tell me where it is and how bad it is out of 10 — or book with the link below this chat.',
+  () =>
+    'I am an automated assistant, so there is a lot I cannot answer. Everything you write here is kept with your record, and the clinician you book with will read it.',
+];
+
+/** A phrase from each fallback, so a later turn can tell how many have been used. */
+const FALLBACK_MARKS = [
+  'I have noted that',
+  'written that down as well',
+  'there is a lot I cannot answer',
+];
 
 /* --------------------------------------------------------------- reading the thread */
 
@@ -168,12 +201,14 @@ function suggestion(u: Understanding, rule: Rule, urgency: TriageUrgency): strin
 export function converse(request: TriageRequest): TriageResult {
   /* Pair every patient message with the question just before it. */
   const answers: Answer[] = [];
+  const assistantTurns: string[] = [];
   const asked = new Set<QuestionId>();
   let lastQuestion: QuestionId | null = null;
   let suggested = false;
 
   for (const turn of request.history) {
     if (turn.role === 'assistant') {
+      assistantTurns.push(turn.body);
       lastQuestion = questionIn(turn.body);
       if (lastQuestion) asked.add(lastQuestion);
       if (turn.body.includes(SUGGESTION)) suggested = true;
@@ -193,9 +228,27 @@ export function converse(request: TriageRequest): TriageResult {
 
   const before = understand(answers);
   const now = understand([...answers, current]);
-  const rule = now.rule ?? GENERAL;
   const urgency = urgencyOf([...answers, current], now);
   const intents = current.intents;
+
+  /*
+   * A different problem, raised after the suggestion.
+   *
+   * Everything else here reads the thread as one complaint and lets the earliest mention
+   * win, which is right while the first problem is being pinned down. It is wrong the
+   * moment someone says "actually, now my head hurts": the old answer then repeats itself
+   * forever, which is exactly what it used to do. A complaint in THIS message, after a
+   * suggestion has been given, takes over — and is summarised from this message alone,
+   * because the earlier "for three days" belongs to the earlier problem.
+   */
+  const fresh = readComplaint(current.prepared);
+  const previously = (before.rule ?? GENERAL).specialty;
+  const switched = suggested && fresh !== null && fresh.specialty !== previously;
+
+  const rule = switched ? fresh! : (now.rule ?? GENERAL);
+
+  /* "I am in pain" names no part of the body; the useful reply is a question, not a shrug. */
+  const mentionsPain = /\b(pain|hurts|hurting|ache|aching|sore)\b/.test(current.prepared);
 
   const reply: string[] = [];
 
@@ -225,6 +278,7 @@ export function converse(request: TriageRequest): TriageResult {
   if (intents.medicine) reply.push(ANSWERS.medicine);
   if (intents.diagnosis) reply.push(ANSWERS.diagnosis);
   if (intents.booking) reply.push(ANSWERS.booking);
+  if (intents.clinicInfo) reply.push(ANSWERS.clinicInfo);
 
   /* Acknowledge the problem once, the first time it is understood. */
   if (now.rule && !before.rule) reply.unshift(now.rule.ack);
@@ -234,29 +288,36 @@ export function converse(request: TriageRequest): TriageResult {
   if (intents.greeting && answers.length === 0) reply.unshift('Hello!');
 
   /* Then the next question, or the suggestion, or the close. */
-  const next = nextQuestion(now, asked, current, lastQuestion);
+  const next = nextQuestion(now, asked, current, lastQuestion, mentionsPain);
   if (next) {
     reply.push(next === 'details' ? detailsQuestion(rule) : Q[next]);
   } else if (!suggested) {
     reply.push(suggestion(now, rule, urgency));
+  } else if (switched) {
+    reply.push(
+      'Thanks for telling me — that sounds like a different problem.',
+      suggestion(understand([current]), rule, urgency),
+    );
   } else {
-    const was = {
-      specialty: (before.rule ?? GENERAL).specialty,
-      urgency: urgencyOf(answers, before),
-    };
-    if (was.specialty !== rule.specialty || was.urgency !== urgency) {
+    const wasUrgency = urgencyOf(answers, before);
+    if (wasUrgency !== urgency) {
       reply.push('Thanks, that changes my suggestion.', suggestion(now, rule, urgency));
     } else if (intents.thanks || intents.bye || intents.no) {
       reply.push(ANSWERS.closing);
+    } else if (intents.greeting && reply.length === 0) {
+      reply.push('Hello again. Tell me what is bothering you now, or ask me anything.');
     } else if (intents.yes && reply.length === 0) {
       reply.push('Go ahead, I am listening.');
     } else if (intents.ok && reply.length === 0) {
       reply.push('Okay. If there is anything else, just tell me.');
+    } else if (mentionsPain && !fresh && !asked.has('where')) {
+      reply.push(Q.where);
     } else if (reply.length === 0) {
-      reply.push(
-        `Thanks, I have noted that. My suggestion is still the same: ${rule.because}`,
-        ANSWERS.anythingElse,
-      );
+      /* A different sentence each time, so three unclear messages do not get one answer. */
+      const used = assistantTurns.filter((turn) =>
+        FALLBACK_MARKS.some((mark) => turn.includes(mark)),
+      ).length;
+      reply.push(FALLBACKS[Math.min(used, FALLBACKS.length - 1)]!(rule));
     }
   }
 
@@ -280,7 +341,10 @@ function nextQuestion(
   asked: Set<QuestionId>,
   current: Answer,
   lastQuestion: QuestionId | null,
+  mentionsPain: boolean,
 ): QuestionId | null {
+  /* Pain with no part of the body named: ask where before asking anything else. */
+  if (!u.rule && mentionsPain && !asked.has('where')) return 'where';
   if (!u.rule && !asked.has('complaint')) return 'complaint';
   if (!u.duration && !asked.has('duration')) return 'duration';
   if (!u.severity && !asked.has('severity')) return 'severity';

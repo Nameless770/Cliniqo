@@ -18,6 +18,23 @@ import { z } from 'zod';
 
 const booleanish = z.enum(['true', 'false']).transform((v) => v === 'true');
 
+/**
+ * Whether a URL points back at this machine.
+ *
+ * Used to decide whether pointing the triage engine at a model is a disclosure at all.
+ * Names only — `localhost`, the loopback addresses — never a private LAN range: a model on
+ * another box on the clinic's network IS somewhere else, even if no packet leaves the
+ * building, and it should be considered on purpose rather than by an address heuristic.
+ */
+function isLoopback(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
 const schema = z
   .object({
     /* --- Runtime ---------------------------------------------------------- */
@@ -116,10 +133,25 @@ const schema = z
      * this process. `openai` sends it to a third party, which is a disclosure of PHI and
      * is gated below.
      */
-    TRIAGE_ENGINE: z.enum(['local', 'openai']).default('local'),
+    TRIAGE_ENGINE: z.enum(['local', 'openai', 'model']).default('local'),
 
     OPENAI_API_KEY: z.string().min(1).optional(),
     OPENAI_MODEL: z.string().min(1).default('gpt-4o-mini'),
+
+    /**
+     * `model`: any server speaking the OpenAI chat-completions shape.
+     *
+     * The reason this exists separately from `openai` is that the same protocol covers a
+     * model running on the clinic's OWN machine — Ollama, LM Studio, vLLM — where the
+     * symptom text never leaves the building and there is no vendor, no BAA and no bill.
+     * That is the configuration to prefer, and the URL is what decides which it is: the
+     * refinement below demands the BAA acknowledgement for any host that is not this
+     * machine.
+     */
+    TRIAGE_MODEL_URL: z.url().optional(),
+    TRIAGE_MODEL_NAME: z.string().min(1).optional(),
+    /** Local servers need no key. Sent as a bearer token when present. */
+    TRIAGE_MODEL_KEY: z.string().min(1).optional(),
 
     /**
      * The operator asserting that a Business Associate Agreement covers the model vendor.
@@ -247,6 +279,32 @@ const schema = z
         path: ['OPENAI_API_KEY'],
         message: 'OPENAI_API_KEY is required when TRIAGE_ENGINE=openai.',
       });
+    }
+
+    if (env.TRIAGE_ENGINE === 'model') {
+      if (!env.TRIAGE_MODEL_URL || !env.TRIAGE_MODEL_NAME) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['TRIAGE_MODEL_URL'],
+          message:
+            'TRIAGE_MODEL_URL and TRIAGE_MODEL_NAME are required when TRIAGE_ENGINE=model.',
+        });
+      } else if (!isLoopback(env.TRIAGE_MODEL_URL) && !env.TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED) {
+        /*
+         * A model on this machine is not a disclosure — nothing leaves the server, so there
+         * is no business associate to sign anything. Any other host is a third party, and
+         * the same acknowledgement the OpenAI path needs applies, whatever the vendor calls
+         * its free tier.
+         */
+        ctx.addIssue({
+          code: 'custom',
+          path: ['TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED'],
+          message:
+            'TRIAGE_MODEL_URL points at another host, which discloses patient symptom ' +
+            'text to it. Set TRIAGE_THIRD_PARTY_BAA_ACKNOWLEDGED=true only when a BAA ' +
+            'covers that vendor, or run the model on this machine (http://localhost:…).',
+        });
+      }
     }
 
     /*

@@ -110,6 +110,12 @@ describe('the built-in assistant, holding a conversation', () => {
     expect(replies[5]).toMatch(/^okay\. if there is anything else/i);
   });
 
+  it('does not guess the clinic\'s opening hours', () => {
+    const { replies } = chat('my ear hurts', 'is the clinic open on saturday?');
+    expect(replies[1]).toMatch(/do not know the clinic/i);
+    expect(replies[1]).not.toMatch(/\bopen on\b|\bclosed on\b/i);
+  });
+
   it('does not diagnose when asked what it is', () => {
     const { replies } = chat('my knee hurts', 'what is it?');
     expect(replies[1]).toMatch(/cannot tell you what it is/i);
@@ -153,6 +159,56 @@ describe('the built-in assistant, holding a conversation', () => {
   it('gives a crisis line with a mental health suggestion', () => {
     const { replies } = chat('I have been feeling anxious', 'for months', '6', 'no');
     expect(replies[3]).toMatch(/crisis line/i);
+  });
+
+  it('moves to the new problem when one is raised after the suggestion', () => {
+    /*
+     * The defect this covers, seen in a real thread: once a suggestion existed, every
+     * later message was answered "my suggestion is still the same" — including one that
+     * named a completely different part of the body — because the earliest complaint in
+     * the thread always won.
+     */
+    const { replies, last } = chat(
+      'my stomach hurts',
+      '3 days',
+      '4',
+      'no',
+      'my head hurts now',
+    );
+
+    expect(replies[4]).toMatch(/different problem/i);
+    expect(replies[4]).toMatch(/neurology/i);
+    // Summarised from the new problem, not the old one.
+    expect(replies[4]).not.toMatch(/for 3 days/);
+    expect(last.specialty).toBe('Neurology');
+  });
+
+  it('says something different each time it does not understand', () => {
+    const { replies } = chat(
+      'my stomach hurts',
+      '3 days',
+      '4',
+      'no',
+      'qwertyuiop',
+      'asdfghjkl',
+      'zxcvbnm',
+    );
+
+    const afterSuggestion = replies.slice(4);
+    expect(new Set(afterSuggestion).size).toBe(afterSuggestion.length);
+    // And the last of them is honest about what it cannot do.
+    expect(afterSuggestion.at(-1)).toMatch(/cannot answer/i);
+  });
+
+  it('asks where the pain is when no part of the body is named', () => {
+    const { replies } = chat('im in pain');
+    expect(replies[0]).toMatch(/where is the pain/i);
+  });
+
+  it('greets back mid-conversation instead of repeating the suggestion', () => {
+    const { replies } = chat('my ear hurts', '2 days', '3', 'no', 'hello');
+    expect(replies[4]).toMatch(/hello again/i);
+    expect(replies[4]).not.toMatch(/my suggestion/i);
   });
 
   it('is deterministic', () => {

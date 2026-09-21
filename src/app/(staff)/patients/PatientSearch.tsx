@@ -231,7 +231,8 @@ export function PatientSearch({
                   <Th>Status</Th>
                 </Tr>
               </thead>
-              <tbody>
+              {/* The first rows arrive one after another; the rest are simply there. */}
+              <tbody className="cq-stagger">
                 {rows.map((row) => (
                   <Tr key={row.id}>
                     <Td variant="identifier">{row.mrn}</Td>

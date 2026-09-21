@@ -105,7 +105,8 @@ export const RULES: Rule[] = [
     ack: 'I am sorry you are dealing with this.',
     because: 'Nerve and headache symptoms are looked at by our neurology service.',
     examples: 'numbness, weakness, or changes in your vision',
-    any: ['headache', 'migraine', 'dizzy', 'dizziness', 'numbness', 'tingling', 'tremor', 'memory', 'balance', 'my head hurts'],
+    /* "head" as a whole word, and the two commonest misspellings of "headache". */
+    any: ['headache', 'hedache', 'headake', 'head', 'migraine', 'dizzy', 'dizziness', 'numbness', 'tingling', 'tremor', 'memory', 'balance', 'my head hurts'],
   },
   {
     specialty: 'Urology',
@@ -427,6 +428,8 @@ export type Intents = {
   booking: boolean;
   human: boolean;
   identity: boolean;
+  /** Opening hours, prices, address, phone: things only the clinic can state. */
+  clinicInfo: boolean;
 };
 
 /**
@@ -469,5 +472,10 @@ export function readIntents(raw: string): Intents {
       text,
     ),
     identity: /\b(who are you|are you (a )?(bot|robot|ai|human|real|doctor|person)|what are you)\b/.test(text),
+    clinicInfo:
+      asking &&
+      /\b(open|opening|close|closed|hours|address|located|where are you|phone number|telephone|price|prices|cost|how much|fee|insurance|parking|saturday|sunday|weekend)\b/.test(
+        text,
+      ),
   };
 }

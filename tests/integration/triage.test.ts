@@ -338,11 +338,14 @@ describe('symptom triage', () => {
 
   /* ------------------------------------------------------------- durability */
 
-  it("keeps the patient's message when the engine fails", async () => {
+  it("answers from the built-in engine, and keeps the patient's message, when the model fails", async () => {
     /*
-     * The reason the write is split across two transactions. An outage costs a reply, not
-     * the words somebody typed while feeling unwell — they retry against a thread that
-     * still has their history.
+     * A model being down is not the patient's problem. The built-in engine needs nothing
+     * but this process, so it answers instead of an error banner — and the conversation
+     * records that it did, so nobody later reads its wording as the model's.
+     *
+     * The split across two transactions still matters: the words somebody typed while
+     * feeling unwell are committed before anything downstream can fail.
      */
     __setTriageEngine({
       name: 'broken',
@@ -350,16 +353,25 @@ describe('symptom triage', () => {
     });
 
     const result = await sendTriageMessage(null, 'my elbow has been aching for a week');
-    expect(result).toEqual({ ok: false, reason: 'upstream' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.reply).toMatch(/\w/);
+    expect(result.specialty).toBe('Orthopaedics');
 
-    const saved = await appPool.query(
+    const saved = await appPool.query<{ body: string; role: string }>(
       `SELECT m.body, m.role FROM triage_message m
          JOIN triage_conversation c ON c.id = m.conversation_id
         WHERE c.patient_id = $1 AND m.body LIKE '%elbow%'`,
       [base.patientId],
     );
     expect(saved.rowCount).toBe(1);
-    expect(saved.rows[0].role).toBe('patient');
+    expect(saved.rows[0]!.role).toBe('patient');
+
+    const stored = await appPool.query<{ engine: string }>(
+      'SELECT engine FROM triage_conversation WHERE id = $1',
+      [result.conversationId],
+    );
+    expect(stored.rows[0]!.engine).toBe('local:2-after-broken');
   });
 
   /* ------------------------------------------------------------------- audit */

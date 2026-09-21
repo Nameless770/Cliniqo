@@ -19,6 +19,19 @@ try {
   // No .env — expected in CI, where the variables come from the environment.
 }
 
+/*
+ * The suite never talks to a model, whatever the developer's .env says.
+ *
+ * Found the hard way: pointing .env at a model on this machine made the integration tests
+ * hold real conversations with it — slow, non-deterministic, and green or red depending on
+ * software that is not part of this repository. The model engine is covered by its own
+ * tests against a stubbed server; everything else asserts the built-in engine.
+ */
+process.env['TRIAGE_ENGINE'] = 'local';
+delete process.env['TRIAGE_MODEL_URL'];
+delete process.env['TRIAGE_MODEL_NAME'];
+delete process.env['TRIAGE_MODEL_KEY'];
+
 /**
  * Database-backed test configuration.
  *

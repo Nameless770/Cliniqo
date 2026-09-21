@@ -1,9 +1,10 @@
 import 'server-only';
 
 import { getEnv } from '@/env/server';
+import { describeError } from '@/lib/pg-errors';
 
-import { LocalTriageEngine } from './local-engine';
-import { OpenAiTriageEngine } from './openai-engine';
+import { converse, LocalTriageEngine } from './local-engine';
+import { ModelTriageEngine } from './model-engine';
 import { detectRedFlag, GENERAL_EMERGENCY_MESSAGE, redFlagMessage } from './red-flags';
 import type { TriageEngine, TriageRequest, TriageResult } from './types';
 
@@ -39,9 +40,27 @@ export function getTriageEngine(): TriageEngine {
      * `env` has already refused to validate if the key is missing or the BAA has not been
      * acknowledged, so reaching here means an operator made that decision explicitly.
      */
-    cached = new OpenAiTriageEngine({
-      apiKey: env.OPENAI_API_KEY!,
+    cached = new ModelTriageEngine({
+      endpoint: 'https://api.openai.com/v1/chat/completions',
       model: env.OPENAI_MODEL,
+      apiKey: env.OPENAI_API_KEY!,
+      label: `openai:${env.OPENAI_MODEL}`,
+    });
+  } else if (env.TRIAGE_ENGINE === 'model') {
+    /*
+     * Any OpenAI-compatible server. `env` has already demanded the BAA acknowledgement
+     * unless the URL is this machine, where nothing is disclosed to anyone.
+     *
+     * The host is part of the recorded label on purpose: "which model said this" is only
+     * half an answer six years from now if nobody can tell whether it ran here or at a
+     * vendor.
+     */
+    const endpoint = env.TRIAGE_MODEL_URL!;
+    cached = new ModelTriageEngine({
+      endpoint,
+      model: env.TRIAGE_MODEL_NAME!,
+      apiKey: env.TRIAGE_MODEL_KEY,
+      label: `model:${env.TRIAGE_MODEL_NAME}@${new URL(endpoint).host}`,
     });
   } else {
     cached = new LocalTriageEngine();
@@ -144,6 +163,27 @@ export async function assessSymptoms(
   const standingCode = options.standingRedFlagCode ?? null;
   if (standingCode || request.alreadyEmergency) return emergency(standingCode, true);
 
-  const result = await getTriageEngine().assess(request);
-  return { ...result, redFlagCode: null, redFlagStanding: false };
+  const engine = getTriageEngine();
+  try {
+    const result = await engine.assess(request);
+    return { ...result, redFlagCode: null, redFlagStanding: false };
+  } catch (error) {
+    /*
+     * A model that is off, slow or broken must not leave someone who is unwell holding an
+     * error message. The built-in engine answers instead — it needs nothing but this
+     * process — and the row records that it did, so nobody later reads its wording as the
+     * model's.
+     *
+     * `describeError`, never the error itself: an upstream body can echo the request, and
+     * the request is the patient's symptom text.
+     */
+    console.error('[triage] engine unavailable:', describeError(error));
+    const built = converse(request);
+    return {
+      ...built,
+      engine: `local:2-after-${engine.name}`,
+      redFlagCode: null,
+      redFlagStanding: false,
+    };
+  }
 }
